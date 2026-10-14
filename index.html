@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="fr" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        try {
+          var _origFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() { return _origFetch; },
+            set: function(fn) { _origFetch = fn; },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {}
+
+        var isExtError = function(msg, file, stack) {
+          var str = ((msg || '') + ' ' + (file || '') + ' ' + (stack || '')).toLowerCase();
+          return str.indexOf('cannot set property fetch') !== -1 ||
+                 str.indexOf('fetch of #<window>') !== -1 ||
+                 str.indexOf('chrome-extension:') !== -1 ||
+                 str.indexOf('moz-extension:') !== -1 ||
+                 str.indexOf('frame_ant') !== -1;
+        };
+
+        window.addEventListener('error', function(e) {
+          if (isExtError(e.message, e.filename, e.error && e.error.stack)) {
+            if (e.preventDefault) e.preventDefault();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function(e) {
+          var r = e.reason;
+          var msg = r instanceof Error ? r.message : String(r || '');
+          var stack = r && r.stack ? r.stack : '';
+          if (isExtError(msg, '', stack)) {
+            if (e.preventDefault) e.preventDefault();
+            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
+    <title>La Boîte à Merveilles - قراءة وترجمة تفاعلية لأولى باك</title>
+    <meta name="description" content="منصة تعليمية تفاعلية شاملة لطلاب الأولى باكالوريا بالمغرب لمؤلفات الامتحان الجهوي: علبة العجائب (La Boîte à Merveilles)، مسرحية أنتيجون (Antigone)، ورواية آخر يوم لمحكوم عليه بالإعدام (Le Dernier Jour d'un Condamné) لفيكتور هوغو، مع قراءة كاملة، ملخصات عربية دقيقة، ترجمة سياقية ذاتية التحقق، واختبارات جهوية نموذجية." />
+    <meta property="og:title" content="La Boîte à Merveilles - قراءة وترجمة تفاعلية لأولى باك" />
+    <meta property="og:description" content="منصة تعليمية تفاعلية شاملة لطلاب الأولى باكالوريا بالمغرب لمؤلفات الامتحان الجهوي: علبة العجائب، أنتيجون، وآخر يوم لمحكوم عليه بالإعدام." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Cairo:wght@400;500;600;700;800&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-[#F8F9FA] text-slate-800 antialiased selection:bg-indigo-100 selection:text-indigo-900">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

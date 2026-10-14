@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-serif: "Cormorant Garamond", Georgia, serif;
+  --font-arabic: "Cairo", "Amiri", system-ui, sans-serif;
+  --font-amiri: "Amiri", serif;
+  --font-sans: "Outfit", system-ui, sans-serif;
+}
+
+/* Custom smooth styling */
+.font-arabic {
+  font-family: 'Cairo', 'Amiri', system-ui, sans-serif;
+}
+
+.font-amiri {
+  font-family: 'Amiri', serif;
+}
+
+.font-book {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+}
+
+/* Custom parchment/paper texture background */
+.bg-book-paper {
+  background-color: #fcfbf9;
+  background-image: radial-gradient(#e5ded4 0.75px, transparent 0.75px), radial-gradient(#f1ede6 0.75px, #fcfbf9 0.75px);
+  background-size: 30px 30px;
+  background-position: 0 0, 15px 15px;
+}
+
+.dark .bg-book-paper {
+  background-color: #0f1117;
+  background-image: radial-gradient(#222736 0.75px, transparent 0.75px), radial-gradient(#181b24 0.75px, #0f1117 0.75px);
+  background-size: 30px 30px;
+  background-position: 0 0, 15px 15px;
+}
+
+/* Dynamic Speech Synthesis Waveform Animation */
+@keyframes waveform {
+  0%, 100% {
+    height: 4px;
+    opacity: 0.5;
+  }
+  50% {
+    height: 16px;
+    opacity: 1;
+  }
+}
+
+.animate-waveform-1 {
+  animation: waveform 0.8s ease-in-out infinite;
+}
+.animate-waveform-2 {
+  animation: waveform 0.8s ease-in-out 0.15s infinite;
+}
+.animate-waveform-3 {
+  animation: waveform 0.8s ease-in-out 0.3s infinite;
+}
+.animate-waveform-4 {
+  animation: waveform 0.8s ease-in-out 0.45s infinite;
+}
+/* Resolution Presets & Viewport Containers */
+.res-container-auto {
+  width: 100%;
+  max-width: 100%;
+}
+
+.res-container-laptop {
+  max-width: 1366px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.res-container-desktop {
+  max-width: 1920px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.res-container-tablet {
+  max-width: 1024px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.res-container-mobile {
+  max-width: 430px;
+  margin-left: auto;
+  margin-right: auto;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.15);
+}
+
+.res-container-wide {
+  max-width: 2560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Universal screen scale & resolution harmony (l standar 75% f ga3 les écrans) */
+html.res-scale-75,
+#root.res-scale-75,
+.res-scale-75,
+.res-scale-compact {
+  zoom: 0.75;
+}
+
+html.res-scale-80,
+#root.res-scale-80,
+.res-scale-80 {
+  zoom: 0.8;
+}
+
+html.res-scale-85,
+#root.res-scale-85,
+.res-scale-85 {
+  zoom: 0.85;
+}
+
+html.res-scale-100,
+#root.res-scale-100,
+.res-scale-100 {
+  zoom: 1;
+}
+
