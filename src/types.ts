@@ -344,7 +344,24 @@ export interface FocusSessionState {
   pomodoroDurationMinutes: number;
   pomodoroSecondsRemaining: number;
   soundEnabled: boolean;
+  sessionSeconds?: number;
 }
 
-
-
+export interface ReadingSessionStats {
+  sessionSeconds: number;
+  todaySeconds: number;
+  pageSeconds: number;
+  isTimerRunning: boolean;
+  averageSecondsPerPage: number;
+  averageMinutesPerPage: number;
+  pagesCounted: number;
+  isSpeedEstimated: boolean;
+  remainingPagesInChapter: number;
+  chapterRemainingSeconds: number;
+  chapterRemainingMinutes: number;
+  formattedSessionTime: string;
+  formattedChapterRemaining: string;
+  chapterProgressPercent: number;
+  chapterTitle: string;
+  chapterNumber: number;
+}

@@ -1,10 +1,11 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   TrendingUp, Trophy, Flag, ChevronLeft, ChevronRight, 
-  Compass, Clock, CheckCircle2, BookOpen, Sparkles, MapPin
+  Compass, Clock, CheckCircle2, BookOpen, Sparkles, MapPin, Timer
 } from 'lucide-react';
-import { BookInfo, ChapterMeta } from '../types';
+import { BookInfo, ChapterMeta, ReadingSessionStats } from '../types';
 import { getChapterForBookPage, getBookChapters } from '../data/bookService';
+import { getReadingSessionStats, subscribeToFocusSession } from '../data/focusService';
 
 export interface ReaderProgressBarProps {
   bookInfo: BookInfo;
@@ -34,6 +35,19 @@ export const ReaderProgressBar: React.FC<ReaderProgressBarProps> = ({
 
   // Completion calculation based on the last read page
   const clampedPage = Math.max(1, Math.min(lastReadPage, totalPages));
+
+  // Live reading session timer & chapter remaining time calculation
+  const [sessionStats, setSessionStats] = useState<ReadingSessionStats>(() =>
+    getReadingSessionStats(bookInfo.id, clampedPage)
+  );
+
+  useEffect(() => {
+    setSessionStats(getReadingSessionStats(bookInfo.id, clampedPage));
+    const unsubscribe = subscribeToFocusSession(() => {
+      setSessionStats(getReadingSessionStats(bookInfo.id, clampedPage));
+    });
+    return unsubscribe;
+  }, [bookInfo.id, clampedPage]);
   const completionPercent = totalPages > 0 
     ? Math.min(100, Math.max(1, Math.round((clampedPage / totalPages) * 100))) 
     : 0;
@@ -429,6 +443,15 @@ export const ReaderProgressBar: React.FC<ReaderProgressBarProps> = ({
                       (ص {hoveredChapter.startPage}-{hoveredChapter.endPage})
                     </span>
                   </div>
+                  {hoveredChapter.chapter === currentChapter.chapter && (
+                    <>
+                      <span className="text-stone-500">·</span>
+                      <span className="text-[10px] text-amber-300 font-mono flex items-center gap-1">
+                        <Timer className="w-3 h-3 text-amber-400" />
+                        متبقي: {sessionStats.formattedChapterRemaining}
+                      </span>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -451,6 +474,9 @@ export const ReaderProgressBar: React.FC<ReaderProgressBarProps> = ({
               </span>
               <span className="text-amber-700 dark:text-amber-300 font-mono font-normal text-[10px] shrink-0">
                 [ص {currentChapter.startPage} ➔ {currentChapter.endPage}]
+              </span>
+              <span className="text-emerald-700 dark:text-emerald-400 font-mono text-[10px] font-bold bg-emerald-500/15 dark:bg-emerald-500/20 px-1 rounded shrink-0">
+                {sessionStats.formattedChapterRemaining}
               </span>
             </div>
             <span className="text-stone-400 dark:text-stone-500 text-xs">▶</span>

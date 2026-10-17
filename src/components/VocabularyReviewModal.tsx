@@ -150,6 +150,65 @@ export const VocabularyReviewModal: React.FC<VocabularyReviewModalProps> = ({
     }
   };
 
+  const handleExportOrPrintPDF = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="ar" dir="rtl">
+      <head>
+        <meta charset="utf-8">
+        <title>قاموس ومفردات الرواية - الامتحان الجهوي الأولى باكالوريا</title>
+        <style>
+          body { font-family: 'Amiri', Tahoma, Arial, sans-serif; padding: 30px; color: #111; line-height: 1.8; background: #fff; }
+          h1 { text-align: center; color: #14532d; border-bottom: 2px solid #059669; padding-bottom: 12px; font-size: 22px; }
+          .meta { text-align: center; color: #4b5563; margin-bottom: 25px; font-size: 13px; font-weight: bold; }
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+          th, td { border: 1px solid #d1d5db; padding: 12px 14px; text-align: right; font-size: 13px; vertical-align: top; }
+          th { background-color: #f0fdf4; color: #065f46; font-size: 14px; }
+          tr:nth-child(even) { background-color: #f9fafb; }
+          .fr { font-family: Georgia, serif; font-weight: bold; color: #1f2937; direction: ltr; text-align: left; display: inline-block; font-size: 14px; }
+          .ar { color: #047857; font-weight: bold; font-size: 14px; }
+          @media print {
+            body { -webkit-print-color-adjust: exact; }
+            button { display: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>📚 قاموس ومفردات الرواية والتظليلات - مقررات الأولى باكالوريا</h1>
+        <div class="meta">عدد المفردات المعروضة: ${filteredCards.length} | تاريخ التصدير: ${new Date().toLocaleDateString('ar-MA')}</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 28%;">الكلمة أو التظليل (Français)</th>
+              <th style="width: 28%;">المعنى بالعربية</th>
+              <th style="width: 44%;">الشرح السياقي في الرواية</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredCards.map(c => `
+              <tr>
+                <td><span class="fr">${c.frenchWord}</span></td>
+                <td><span class="ar">${c.arabicMeaning}</span></td>
+                <td>${c.contextualMeaning || c.definitionArabic || c.arabicMeaning}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+      </html>
+    `;
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   // ==========================================
   // RELAX / 3AYAN CONTINUOUS AUDIO AUTO-PLAYER
   // ==========================================
@@ -2070,9 +2129,19 @@ export const VocabularyReviewModal: React.FC<VocabularyReviewModalProps> = ({
                   المفردات والتظليلات المعروضة:{' '}
                   <strong className="text-amber-900 dark:text-amber-300 font-mono text-sm">{filteredCards.length}</strong>
                 </span>
-                <span className="text-[11px] text-amber-900/80 dark:text-amber-400/80">
-                  💡 انقر على أي كلمة أو تظليل لعرض الشرح الكامل والسياق في الرواية
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportOrPrintPDF}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold font-arabic text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                    title="تصدير المفردات الحالية إلى ملف PDF أو طباعتها"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>تصدير PDF / طباعة المفردات 🖨️</span>
+                  </button>
+                  <span className="text-[11px] text-amber-900/80 dark:text-amber-400/80 hidden sm:inline">
+                    💡 انقر على أي كلمة لعرض الشرح
+                  </span>
+                </div>
               </div>
 
               {filteredCards.length === 0 ? (

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+import gsap from 'gsap';
 import {
   createSelectionManager,
   SelectionManager,
@@ -36,6 +37,8 @@ import {
   formatFocusTime,
   getPageReadingSeconds,
   setActiveReadingPage,
+  getReadingSessionStats,
+  getAverageReadingSpeed,
 } from '../data/focusService';
 import {
   getAllHighlights,
@@ -405,6 +408,11 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   const currentPageFocusSeconds = getPageReadingSeconds(currentBookId, currentPageData.pageNumber);
 
+  // Live reading session stats & chapter remaining time calculation
+  const sessionStats = useMemo(() => {
+    return getReadingSessionStats(currentBookId, currentPageData.pageNumber);
+  }, [currentBookId, currentPageData.pageNumber, focusState]);
+
   useEffect(() => {
     setIsBookmarked(isPageBookmarked(currentBookId, currentPageData.pageNumber));
     const unsubscribe = subscribeToBookmarks(() => {
@@ -501,6 +509,24 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   const validSubPageIndex = Math.min(subPageIndex, Math.max(0, pageChunks.length - 1));
   const currentChunk = pageChunks[validSubPageIndex] || pageChunks[0];
 
+  // Reading mode state: 'chunks' (Pocket book pages) vs 'full' (Full continuous page view)
+  const [readingMode, setReadingMode] = useState<'chunks' | 'full'>('chunks');
+  const fullPageParagraphs = useMemo(() => {
+    return currentPageData.text.split(/\r?\n+/).map((p) => p.trim()).filter(Boolean);
+  }, [currentPageData.text]);
+
+  const readerContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (readerContainerRef.current) {
+      gsap.fromTo(
+        readerContainerRef.current,
+        { opacity: 0, y: 15, scale: 0.995 },
+        { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: 'power3.out' }
+      );
+    }
+  }, [currentPageData.pageNumber, readingMode]);
+
   // Automatically switch tab to 'translation' when new active translation arrives
   useEffect(() => {
     if (activeTranslation) {
@@ -540,18 +566,19 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
   // Stop audio on subpage index change as well
   useEffect(() => {
     stopAudioReading();
-  }, [subPageIndex, stopAudioReading]);
+  }, [subPageIndex, readingMode, stopAudioReading]);
 
-  // Automatically sync sentences of current pocket page chunk with AccessibleTTSEngine
+  // Automatically sync sentences of current page or chunk with AccessibleTTSEngine
   useEffect(() => {
     accessibleTTS.stop();
-    const sentences = splitParagraphsIntoSentences(currentChunk.paragraphs);
+    const paras = readingMode === 'full' ? fullPageParagraphs : currentChunk.paragraphs;
+    const sentences = splitParagraphsIntoSentences(paras);
     accessibleTTS.loadSentences(sentences, 'fr');
-  }, [currentChunk.paragraphs, currentPageData.pageNumber]);
+  }, [readingMode, currentChunk.paragraphs, fullPageParagraphs, currentPageData.pageNumber]);
 
-  // Auto-scroll to currently spoken sentence for auditory & visual tracking accessibility (French text)
+  // Auto-scroll to currently spoken sentence for auditory & visual tracking accessibility
   useEffect(() => {
-    if (ttsState.autoScroll && ttsState.isPlaying && currentSpeechLang === 'fr' && ttsState.currentSentence) {
+    if (ttsState.autoScroll && ttsState.isPlaying && (currentSpeechLang === 'fr' || currentSpeechLang === 'ar') && ttsState.currentSentence) {
       const el = document.getElementById(`active-spoken-sentence-${ttsState.currentSentence.index}`);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -692,20 +719,26 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     setCurrentSpeechLang('ar');
     setSpeechSourceLabel(`ترجمة صفحة ${pageNum} (صوت بشري عربي 🇲🇦)`);
 
-    // 1. Check if cached translation exists for this specific page
+    // 1. Determine target Arabic translation for THIS EXACT PAGE (never stale or from chapter start)
     let targetArabic = '';
-    const cached =
-      getCachedTranslation(currentBookId, pageNum, pageText, 'full-sentence', false) ||
-      getLatestPageTranslation(currentBookId, pageNum);
-
-    if (cached && cached.arabicTranslation) {
-      targetArabic = cached.arabicTranslation;
-    } else if (preloadedArabicText && preloadedArabicText.trim().length > 20) {
-      targetArabic = preloadedArabicText;
+    
+    // Priority 0: Active translation already loaded/visible for this page
+    if (activeTranslation && activeTranslation.arabicTranslation && activeTranslation.arabicTranslation.trim().length > 15) {
+      targetArabic = activeTranslation.arabicTranslation;
     } else {
-      const instant = generateInstantTranslation(pageText, pageText, pageNum, 'full-sentence');
-      if (instant && instant.arabicTranslation && instant.arabicTranslation.length > 30) {
-        targetArabic = instant.arabicTranslation;
+      const cached =
+        getCachedTranslation(currentBookId, pageNum, pageText, 'full-sentence', false) ||
+        getLatestPageTranslation(currentBookId, pageNum);
+
+      if (cached && cached.arabicTranslation) {
+        targetArabic = cached.arabicTranslation;
+      } else if (preloadedArabicText && preloadedArabicText.trim().length > 20) {
+        targetArabic = preloadedArabicText;
+      } else {
+        const instant = generateInstantTranslation(pageText, pageText, pageNum, 'full-sentence');
+        if (instant && instant.arabicTranslation && instant.arabicTranslation.length > 30) {
+          targetArabic = instant.arabicTranslation;
+        }
       }
     }
 
@@ -760,7 +793,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
     setCurrentSpokenText(sentences[0]?.text || cleanArabic);
 
-    // Stop previous tracker state and ensure it does not run while audio is being loaded/prepared
+    // Stop previous tracker state and ensure it starts from sentence 0 of THIS page
     accessibleTTS.stop();
 
     // Trigger AI Audio playback for THIS EXACT PAGE (tracker will strictly start when audio actually plays!)
@@ -770,7 +803,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       pageNum,
       `ترجمة صفحة ${pageNum} (صوت بشري عربي 🇲🇦)`
     );
-  }, [preloadedArabicText, currentPageData, currentBookId, bookInfo?.titleFrench]);
+  }, [activeTranslation, preloadedArabicText, currentPageData, currentBookId, bookInfo?.titleFrench]);
 
   // Quick Arabic Audio Reader Trigger for Fast Comprehension
   const startArabicSummaryAudioReading = useCallback(() => {
@@ -788,19 +821,18 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       accessibleTTS.resume();
     } else {
       setShowAudioPlayer(true);
-      if (currentSpeechLang === 'ar') {
+      if (currentSpeechLang === 'ar' || (activeTranslation && activeTranslation.arabicTranslation)) {
+        setCurrentSpeechLang('ar');
         startNaturalArabicAudioReading();
       } else {
-        if (ttsState.totalSentences > 0) {
-          accessibleTTS.play();
-        } else {
-          const sentences = splitParagraphsIntoSentences(currentChunk.paragraphs);
-          accessibleTTS.loadSentences(sentences, 'fr');
-          accessibleTTS.play();
-        }
+        // Reload sentences of current pocket leaf so it never plays from beginning of chapter
+        const sentences = splitParagraphsIntoSentences(currentChunk.paragraphs);
+        accessibleTTS.loadSentences(sentences, 'fr');
+        setCurrentSpeechLang('fr');
+        accessibleTTS.play();
       }
     }
-  }, [aiAudioState, ttsState, currentSpeechLang, startNaturalArabicAudioReading, currentChunk.paragraphs]);
+  }, [aiAudioState, ttsState, currentSpeechLang, activeTranslation, startNaturalArabicAudioReading, currentChunk.paragraphs]);
 
   const changeSpeechRate = useCallback(
     (newRate: number) => {
@@ -962,7 +994,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     const isSentenceActive =
       ttsState.highlightBimodal &&
       ttsState.isPlaying &&
-      currentSpeechLang === 'fr' &&
+      (currentSpeechLang === 'fr' || currentSpeechLang === 'ar') &&
       ttsState.currentSentence?.paragraphIndex === pIdx;
 
     // Helper to render user-applied highlights inside any arbitrary text segment
@@ -1074,9 +1106,14 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           {renderHighlightsInSlice(beforeText, `p${pIdx}-pre`)}
           <span
             id={`active-spoken-sentence-${curSent.index}`}
-            className="bg-amber-100/90 dark:bg-amber-950/80 border-b-2 border-amber-500 rounded px-1 transition-all shadow-2xs inline text-stone-950 dark:text-amber-100 font-semibold ring-2 ring-amber-400/30"
+            className="bg-amber-100/90 dark:bg-amber-950/80 border-b-2 border-amber-500 rounded px-1 transition-all shadow-2xs inline text-stone-950 dark:text-amber-100 font-semibold ring-2 ring-amber-400/30 relative"
           >
             {sentenceContent}
+            {(ttsState.isPaused || aiAudioState.isPaused) && (
+              <span className="inline-flex items-center gap-1 bg-amber-600 text-white font-bold text-[10px] px-1.5 py-0.2 rounded-full mr-1.5 shadow-xs align-middle animate-pulse">
+                📍 هنا توقفت
+              </span>
+            )}
           </span>
           {renderHighlightsInSlice(afterText, `p${pIdx}-post`)}
         </>
@@ -1091,7 +1128,8 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            const sentences = splitParagraphsIntoSentences(currentChunk.paragraphs);
+            const paras = readingMode === 'full' ? fullPageParagraphs : currentChunk.paragraphs;
+            const sentences = splitParagraphsIntoSentences(paras);
             accessibleTTS.loadSentences(sentences, 'fr');
             setShowAudioPlayer(true);
             accessibleTTS.playParagraph(pIdx);
@@ -1115,10 +1153,10 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
 
   // Atmospheric card & border theme tokens
   const topActionBg = isBoite
-    ? 'bg-amber-100/90 dark:bg-[#1b1511] border-amber-200 dark:border-[#38281e]'
+    ? 'bg-amber-100/80 dark:bg-[#1b1511]/85 border-amber-200 dark:border-[#38281e] backdrop-blur-xl'
     : isAntigone
-    ? 'bg-rose-100/90 dark:bg-[#1d0b16] border-rose-200 dark:border-[#421422]'
-    : 'bg-slate-100/90 dark:bg-[#0f172a] border-slate-300 dark:border-[#1e293b]';
+    ? 'bg-rose-100/80 dark:bg-[#1d0b16]/85 border-rose-200 dark:border-[#421422] backdrop-blur-xl'
+    : 'bg-slate-100/80 dark:bg-[#0f172a]/85 border-slate-300 dark:border-[#1e293b] backdrop-blur-xl';
 
   const paperBgTheme = isBoite
     ? 'bg-[#fffefb] dark:bg-[#181310] border-amber-300/80 dark:border-[#38281e] shadow-[0_6px_30px_rgba(70,45,15,0.08)] dark:shadow-[0_6px_30px_rgba(0,0,0,0.6)]'
@@ -1127,7 +1165,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     : 'bg-[#ffffff] dark:bg-[#0c1322] border-slate-300 dark:border-[#1e293b] shadow-[0_6px_30px_rgba(15,23,42,0.08)] dark:shadow-[0_6px_30px_rgba(0,0,0,0.6)]';
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-5 py-3 sm:py-4 space-y-3.5">
+    <div ref={readerContainerRef} className="max-w-7xl mx-auto px-3 sm:px-5 py-3 sm:py-4 space-y-3.5">
       {/* Bespoke Novel Atmosphere Header */}
       {!isZenMode && bookInfo && (
         <div
@@ -1211,17 +1249,43 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       )}
 
       {/* Top Action Bar */}
-      <div className={`${topActionBg} rounded-xl p-2 sm:p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-xs`}>
-        {/* Left Side: Chapter & Sub-page Info */}
-        <div className="flex items-center gap-2">
+      <div className={`${topActionBg} ios-glass rounded-xl p-2 sm:p-2.5 flex flex-wrap items-center justify-between gap-2 shadow-md border border-white/20 dark:border-white/10`}>
+        {/* Left Side: Chapter & Reading Mode Toggle */}
+        <div className="flex items-center gap-2.5 flex-wrap">
           <span className="text-xs sm:text-sm font-arabic font-bold text-amber-950 dark:text-stone-200">
             {currentPageData.chapterTitle}
           </span>
-          {pageChunks.length > 1 && (
+          {readingMode === 'chunks' && pageChunks.length > 1 && (
             <span className="text-[11px] font-serif font-semibold text-amber-800 dark:text-amber-400 bg-amber-200/80 dark:bg-stone-800 px-2 py-0.5 rounded-full border border-amber-300 dark:border-stone-700">
               ورقة {validSubPageIndex + 1} من {pageChunks.length}
             </span>
           )}
+
+          {/* Reading Mode Toggle (Chunks vs Full Page) */}
+          <div className="flex items-center gap-0.5 bg-amber-200/70 dark:bg-stone-800 p-0.5 rounded-lg border border-amber-300 dark:border-stone-700">
+            <button
+              onClick={() => setReadingMode('chunks')}
+              className={`px-2.5 py-0.5 rounded text-[11px] font-arabic font-bold transition-all cursor-pointer ${
+                readingMode === 'chunks'
+                  ? 'bg-amber-800 dark:bg-amber-600 text-white shadow-xs'
+                  : 'text-amber-950 dark:text-stone-300 hover:bg-amber-300/50 dark:hover:bg-stone-700'
+              }`}
+              title="وضع الأوراق المقسمة (Pocket Chunks)"
+            >
+              مقسمة
+            </button>
+            <button
+              onClick={() => setReadingMode('full')}
+              className={`px-2.5 py-0.5 rounded text-[11px] font-arabic font-bold transition-all cursor-pointer ${
+                readingMode === 'full'
+                  ? 'bg-amber-800 dark:bg-amber-600 text-white shadow-xs'
+                  : 'text-amber-950 dark:text-stone-300 hover:bg-amber-300/50 dark:hover:bg-stone-700'
+              }`}
+              title="عرض الصفحة كاملة بلا تقطيع (Full Page View)"
+            >
+              صفحة كاملة ✨
+            </button>
+          </div>
         </div>
 
         {/* Right Side: Audio Read, Highlighting & Quiz Actions */}
@@ -1386,22 +1450,6 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             <span className="hidden sm:inline">إعدادات الصوت</span>
           </button>
 
-          {/* Focus Session Trigger Button */}
-          {onOpenFocusSession && (
-            <button
-              id={`focus-session-btn-${currentPageData.pageNumber}`}
-              onClick={onOpenFocusSession}
-              className="px-2.5 py-1 rounded-lg bg-amber-200/80 dark:bg-stone-800 hover:bg-amber-300 dark:hover:bg-stone-700 border border-amber-300 dark:border-stone-700 text-amber-950 dark:text-amber-300 text-xs font-arabic font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              title="جلسة التركيز والهدف القرائي اليومي"
-            >
-              <Timer className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-              <span>تركيز</span>
-              <span className="font-mono text-[10px] bg-amber-800/15 dark:bg-amber-400/15 text-amber-950 dark:text-amber-200 px-1 py-0.2 rounded font-bold">
-                {formatFocusTime(currentPageFocusSeconds, 'digital')}
-              </span>
-            </button>
-          )}
-
           {/* Highlights Drawer Button */}
           <button
             onClick={() => setIsHighlightsDrawerOpen(true)}
@@ -1463,11 +1511,13 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           ttsState={ttsState}
           onOpenSettings={() => setIsAudioSettingsOpen(true)}
           onClose={() => {
-            accessibleTTS.stop();
+            stopAudioReading();
             setShowAudioPlayer(false);
           }}
+          onTogglePlayPause={togglePauseResumeAudio}
           pageNumber={currentPageData.pageNumber}
           chapterTitle={currentPageData.chapterTitle}
+          currentSpeechLang={currentSpeechLang}
         />
       )}
 
@@ -1720,7 +1770,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
                   <div
                     className={`text-stone-900 dark:text-stone-200 ${fontFamilyClass} tracking-normal ${fontClasses[fontSize]} ${lineSpacingClass} text-justify hyphens-auto`}
                   >
-                    {currentChunk.paragraphs.map((paragraph, pIdx) =>
+                    {(readingMode === 'full' ? fullPageParagraphs : currentChunk.paragraphs).map((paragraph, pIdx) =>
                       renderParagraphWithHighlights(paragraph, pIdx)
                     )}
                   </div>
@@ -1983,19 +2033,34 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
           <span>الصفحة السابقة</span>
         </button>
 
-        {/* Page Slider / Quick Jumper */}
-        <div className="flex items-center gap-3">
-          <input
-            type="range"
-            min={1}
-            max={totalPages}
-            value={currentPageData.pageNumber}
-            onChange={(e) => onPageChange(Number(e.target.value))}
-            className="w-32 sm:w-56 accent-amber-800 dark:accent-amber-500 cursor-pointer"
-          />
-          <span className="text-xs font-serif font-bold text-amber-950 dark:text-amber-300">
-            {currentPageData.pageNumber} / {totalPages}
-          </span>
+        {/* Page Slider / Quick Jumper with Subtle Reading Session Timer */}
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min={1}
+              max={totalPages}
+              value={currentPageData.pageNumber}
+              onChange={(e) => onPageChange(Number(e.target.value))}
+              className="w-32 sm:w-56 accent-amber-800 dark:accent-amber-500 cursor-pointer"
+              aria-label="شريط تقدم صفحات الرواية"
+            />
+            <span className="text-xs font-serif font-bold text-amber-950 dark:text-amber-300">
+              {currentPageData.pageNumber} / {totalPages}
+            </span>
+          </div>
+          <div 
+            className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-arabic text-stone-600 dark:text-stone-300 select-none bg-black/5 dark:bg-white/5 px-2.5 py-0.5 rounded-full border border-stone-300/40 dark:border-stone-700/50"
+            title={`جلسة القراءة: ${sessionStats.formattedSessionTime} | معدل السرعة: ${sessionStats.averageMinutesPerPage} د/صفحة (${sessionStats.isSpeedEstimated ? 'تقدير أساسي' : `محسوب من ${sessionStats.pagesCounted} صفحات`})`}
+          >
+            <Timer className={`w-3 h-3 text-amber-600 dark:text-amber-400 ${focusState.isTimerRunning ? 'animate-pulse' : 'opacity-60'}`} />
+            <span>الجلسة: <strong className="font-mono text-stone-900 dark:text-stone-100">{sessionStats.formattedSessionTime}</strong></span>
+            <span className="text-stone-400">·</span>
+            <span>متبقي للفصل: <strong className="font-mono text-amber-800 dark:text-amber-300 font-bold">{sessionStats.formattedChapterRemaining}</strong></span>
+            <span className="text-[10px] text-stone-400 dark:text-stone-500 font-mono hidden sm:inline">
+              ({sessionStats.averageMinutesPerPage} د/ص)
+            </span>
+          </div>
         </div>
 
         {/* Next Page Button */}

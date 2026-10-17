@@ -9,6 +9,7 @@ import { autoSaveWordTranslation, findSynonymsForWord } from '../data/vocabulary
 import { cleanDirectArabicTranslation } from '../data/translationCache';
 import { TranslationProgressCounter } from './TranslationProgressCounter';
 import { NaturalTTSPlayer, TTSSettings, getTTSSettings, subscribeToTTSSettings, accessibleTTS, splitParagraphsIntoSentences, SpokenSentence } from '../data/ttsService';
+import { playArabicAIAudio, stopAIAudio, subscribeAIAudio, getAIAudioState } from '../data/aiAudioService';
 import { AudioSettingsModal } from './AudioSettingsModal';
 
 interface TranslationSidePanelProps {
@@ -84,10 +85,41 @@ export const TranslationSidePanel: React.FC<TranslationSidePanelProps> = ({
   // Clean up any speech playback when the panel unmounts
   useEffect(() => {
     return () => {
+      stopAIAudio();
       NaturalTTSPlayer.stop();
       accessibleTTS.stop();
     };
   }, []);
+
+  // Listen to AI Audio & AccessibleTTS state for clean button sync
+  useEffect(() => {
+    const unsubAi = subscribeAIAudio((s) => {
+      if (currentPlayingLang === 'ar') {
+        if (s.isPlaying) {
+          setIsPlayingAudio(true);
+        } else if (!s.isPaused && !s.isLoading) {
+          setIsPlayingAudio(false);
+          setCurrentPlayingLang(null);
+        }
+      }
+    });
+
+    const unsubTts = accessibleTTS.subscribe((s) => {
+      if (currentPlayingLang === 'fr') {
+        if (s.isPlaying) {
+          setIsPlayingAudio(true);
+        } else if (!s.isPaused) {
+          setIsPlayingAudio(false);
+          setCurrentPlayingLang(null);
+        }
+      }
+    });
+
+    return () => {
+      unsubAi();
+      unsubTts();
+    };
+  }, [currentPlayingLang]);
 
   const synonyms = isWord
     ? findSynonymsForWord(
@@ -105,6 +137,7 @@ export const TranslationSidePanel: React.FC<TranslationSidePanelProps> = ({
 
   const playSpeech = (text: string, lang: 'fr' | 'ar') => {
     if (isPlayingAudio && currentPlayingLang === lang) {
+      stopAIAudio();
       accessibleTTS.stop();
       NaturalTTSPlayer.stop();
       setIsPlayingAudio(false);
@@ -112,28 +145,31 @@ export const TranslationSidePanel: React.FC<TranslationSidePanelProps> = ({
       return;
     }
 
+    if (lang === 'ar') {
+      stopAIAudio();
+      accessibleTTS.stop();
+      NaturalTTSPlayer.stop();
+      setIsPlayingAudio(true);
+      setCurrentPlayingLang('ar');
+      playArabicAIAudio(text, bookId, pageNumber, `ترجمة صفحة ${pageNumber} (صوت بشري عربي 🇲🇦)`);
+      return;
+    }
+
+    // French language playback
+    stopAIAudio();
     const paragraphs = text.split('\n\n').map(p => p.trim()).filter(Boolean);
     const sentences = splitParagraphsIntoSentences(paragraphs.length > 0 ? paragraphs : [text]);
 
     if (sentences.length > 1 || text.length > 250) {
-      accessibleTTS.loadSentences(sentences, lang);
+      accessibleTTS.loadSentences(sentences, 'fr');
       accessibleTTS.play();
       setIsPlayingAudio(true);
-      setCurrentPlayingLang(lang);
-
-      let unsub: () => void = () => {};
-      unsub = accessibleTTS.subscribe((state) => {
-        if (!state.isPlaying && !state.isPaused) {
-          setIsPlayingAudio(false);
-          setCurrentPlayingLang(null);
-          unsub();
-        }
-      });
+      setCurrentPlayingLang('fr');
     } else {
-      NaturalTTSPlayer.speak(text, lang, {
+      NaturalTTSPlayer.speak(text, 'fr', {
         onStart: () => {
           setIsPlayingAudio(true);
-          setCurrentPlayingLang(lang);
+          setCurrentPlayingLang('fr');
         },
         onEnd: () => {
           setIsPlayingAudio(false);

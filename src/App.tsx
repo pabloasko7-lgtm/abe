@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import gsap from 'gsap';
 import { ErrorBoundaryWrapper } from './components/ErrorBoundaryWrapper';
 import { Navbar } from './components/Navbar';
 import { WelcomeScreen } from './components/WelcomeScreen';
@@ -13,7 +14,7 @@ import { PassageSituationModal } from './components/PassageSituationModal';
 import { AnalyticsDashboardModal } from './components/AnalyticsDashboardModal';
 import { PasswordLockScreen } from './components/PasswordLockScreen';
 import { ScreenResolutionId, RESOLUTION_PRESETS } from './components/ScreenResolutionSelector';
-import { getBookInfo, getPage, getAllPages, getBookChapters, getSurroundingExtendedContext } from './data/bookService';
+import { getBookInfo, getPage, getAllPages, getBookChapters, getChapterForBookPage, getSurroundingExtendedContext } from './data/bookService';
 import { generateInstantTranslation } from './data/translationsDict';
 import { executePedagogicalQuizGeneration } from './data/quizGeneratorService';
 import {
@@ -248,6 +249,50 @@ function AppContent() {
   const currentPage = lastReadPages[currentBook] || 1;
   const currentPageData = getPage(currentBook, currentPage);
   const bookChapters = getBookChapters(currentBook);
+
+  // GSAP-based momentum scroll animation for '--scroll-blur' with non-linear easing
+  useEffect(() => {
+    let lastScrollY = window.scrollY;
+    let ticking = false;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const delta = Math.abs(currentScrollY - lastScrollY);
+      lastScrollY = currentScrollY;
+
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const targetBlur = Math.min(delta * 0.12, 4.5);
+
+          // Animate blur intensity with non-linear easing using GSAP
+          gsap.to(document.documentElement, {
+            '--scroll-blur': `${targetBlur}px`,
+            duration: 0.1,
+            ease: 'power1.out',
+            overwrite: 'auto',
+            onComplete: () => {
+              gsap.to(document.documentElement, {
+                '--scroll-blur': '0px',
+                duration: 0.35,
+                ease: 'power2.out',
+                overwrite: 'auto',
+              });
+            },
+          });
+
+          ticking = false;
+        });
+
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      gsap.killTweensOf(document.documentElement);
+    };
+  }, []);
 
   const handleSelectBook = (bookId: BookId) => {
     stopAllTTS();

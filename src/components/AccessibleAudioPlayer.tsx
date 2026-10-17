@@ -37,6 +37,8 @@ interface AccessibleAudioPlayerProps {
   onClose: () => void;
   pageNumber: number;
   chapterTitle?: string;
+  onTogglePlayPause?: () => void;
+  currentSpeechLang?: 'fr' | 'ar';
 }
 
 export const AccessibleAudioPlayer: React.FC<AccessibleAudioPlayerProps> = ({
@@ -45,6 +47,8 @@ export const AccessibleAudioPlayer: React.FC<AccessibleAudioPlayerProps> = ({
   onClose,
   pageNumber,
   chapterTitle,
+  onTogglePlayPause,
+  currentSpeechLang,
 }) => {
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [aiState, setAiState] = useState<AIAudioState>(() => getAIAudioState());
@@ -144,7 +148,7 @@ export const AccessibleAudioPlayer: React.FC<AccessibleAudioPlayerProps> = ({
                 <span>الصفحة {pageNumber} {chapterTitle ? `• ${chapterTitle}` : ''}</span>
                 <span>•</span>
                 <span className="text-indigo-300 font-sans">
-                  {lang === 'fr' ? 'الفرنسية الأصلية 🇫🇷' : 'الشرح العربي 🇲🇦'}
+                  {(currentSpeechLang || lang) === 'fr' ? 'الفرنسية الأصلية 🇫🇷' : 'الشرح العربي 🇲🇦'}
                 </span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-900/80 to-indigo-900 text-purple-200 border border-purple-500/50 flex items-center gap-1 font-bold">
                   <Sparkles className="w-2.5 h-2.5 text-amber-300" />
@@ -331,17 +335,21 @@ export const AccessibleAudioPlayer: React.FC<AccessibleAudioPlayerProps> = ({
             {/* Play / Pause Toggle */}
             <button
               onClick={() => {
-                const aiState = getAIAudioState();
-                if (aiState.isPlaying && !aiState.isPaused) {
-                  pauseAIAudio();
-                } else if (aiState.isPaused) {
-                  resumeAIAudio();
-                } else if (isPlaying && !isPaused) {
-                  accessibleTTS.pause();
-                } else if (isPaused) {
-                  accessibleTTS.resume();
+                if (onTogglePlayPause) {
+                  onTogglePlayPause();
                 } else {
-                  accessibleTTS.play();
+                  const aiState = getAIAudioState();
+                  if (aiState.isPlaying && !aiState.isPaused) {
+                    pauseAIAudio();
+                  } else if (aiState.isPaused) {
+                    resumeAIAudio();
+                  } else if (isPlaying && !isPaused) {
+                    accessibleTTS.pause();
+                  } else if (isPaused) {
+                    accessibleTTS.resume();
+                  } else {
+                    accessibleTTS.play();
+                  }
                 }
               }}
               aria-label={isPlaying && !isPaused ? 'إيقاف مؤقت للقراءة' : 'تشغيل القراءة الصوتية'}

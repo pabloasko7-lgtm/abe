@@ -1,4 +1,5 @@
-import { BookId, FocusSessionState, DayFocusHistory } from '../types';
+import { BookId, FocusSessionState, DayFocusHistory, ReadingSessionStats } from '../types';
+import { getChapterForBookPage } from './bookService';
 
 const STORAGE_KEY = 'bac1_study_focus_session_data_v1';
 
@@ -35,6 +36,7 @@ const DEFAULT_STATE: FocusSessionState = {
 };
 
 let currentState: FocusSessionState = { ...DEFAULT_STATE };
+let currentSessionSeconds = 0;
 let isInitialized = false;
 let timerInterval: any = null;
 let currentActiveBook: BookId = 'la_boite_a_merveilles';
@@ -154,7 +156,7 @@ function notifySubscribers() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('focus-session-updated', {
-        detail: { ...currentState },
+        detail: { ...currentState, sessionSeconds: currentSessionSeconds },
       })
     );
   }
@@ -187,6 +189,9 @@ function incrementFocusTime(deltaSeconds: number = 1) {
   if (currentState.todayDate !== today) {
     currentState = loadState();
   }
+
+  // Increment current active continuous reading session
+  currentSessionSeconds += deltaSeconds;
 
   const prevSeconds = currentState.todaySeconds;
   const newTodaySeconds = prevSeconds + deltaSeconds;
@@ -222,6 +227,7 @@ function incrementFocusTime(deltaSeconds: number = 1) {
     pageSecondsMap: updatedPageMap,
     lastActiveDate: today,
     pomodoroSecondsRemaining: newPomodoroSecs,
+    sessionSeconds: currentSessionSeconds,
   };
 
   // Throttle save to storage every 5 seconds to reduce I/O
@@ -367,11 +373,13 @@ export function resetCurrentPageTimer(bookId: BookId, pageNumber: number) {
  */
 export function resetTotalSessionTimer() {
   initFocusServiceIfNeeded();
+  currentSessionSeconds = 0;
   currentState = {
     ...currentState,
     todaySeconds: 0,
     pageSecondsMap: {},
     pomodoroSecondsRemaining: currentState.pomodoroDurationMinutes * 60,
+    sessionSeconds: 0,
   };
   saveState();
   notifySubscribers();
@@ -382,6 +390,7 @@ export function resetTotalSessionTimer() {
  */
 export function resetAllCurrentTimers(bookId?: BookId, pageNumber?: number) {
   initFocusServiceIfNeeded();
+  currentSessionSeconds = 0;
   const updatedMap = bookId && pageNumber ? { ...currentState.pageSecondsMap } : {};
   if (bookId && pageNumber) {
     delete updatedMap[`${bookId}_${pageNumber}`];
@@ -391,9 +400,123 @@ export function resetAllCurrentTimers(bookId?: BookId, pageNumber?: number) {
     todaySeconds: 0,
     pageSecondsMap: updatedMap,
     pomodoroSecondsRemaining: currentState.pomodoroDurationMinutes * 60,
+    sessionSeconds: 0,
   };
   saveState();
   notifySubscribers();
+}
+
+/**
+ * Reset current reading session continuous timer
+ */
+export function resetReadingSessionTimer() {
+  currentSessionSeconds = 0;
+  notifySubscribers();
+}
+
+/**
+ * Get current reading session elapsed seconds
+ */
+export function getCurrentSessionSeconds(): number {
+  return currentSessionSeconds;
+}
+
+/**
+ * Calculate user's average reading speed per page in seconds.
+ * Analyzes pages where time spent is within a realistic reading window (15s to 600s).
+ * Returns seconds per page, minutes per page, and whether it's an estimated baseline.
+ */
+export function getAverageReadingSpeed(bookId?: BookId): {
+  secondsPerPage: number;
+  minutesPerPage: number;
+  pagesCounted: number;
+  isEstimated: boolean;
+} {
+  initFocusServiceIfNeeded();
+  const map = currentState.pageSecondsMap;
+  const prefix = bookId ? `${bookId}_` : '';
+  
+  const validTimes: number[] = [];
+  for (const [key, seconds] of Object.entries(map)) {
+    if (!prefix || key.startsWith(prefix)) {
+      if (typeof seconds === 'number' && seconds >= 15 && seconds <= 600) {
+        validTimes.push(seconds);
+      }
+    }
+  }
+
+  if (validTimes.length >= 2) {
+    const sum = validTimes.reduce((acc, val) => acc + val, 0);
+    const avg = Math.round(sum / validTimes.length);
+    const clampedAvg = Math.max(30, Math.min(300, avg));
+    return {
+      secondsPerPage: clampedAvg,
+      minutesPerPage: Math.round((clampedAvg / 60) * 10) / 10,
+      pagesCounted: validTimes.length,
+      isEstimated: false,
+    };
+  }
+
+  // Baseline standard for 1ère Bac French literature study: ~105s (1.8 min/page)
+  return {
+    secondsPerPage: 105,
+    minutesPerPage: 1.8,
+    pagesCounted: validTimes.length,
+    isEstimated: true,
+  };
+}
+
+/**
+ * Calculates estimated reading time remaining for current chapter and session statistics.
+ */
+export function getReadingSessionStats(bookId: BookId, currentPage: number): ReadingSessionStats {
+  initFocusServiceIfNeeded();
+  const chapter = getChapterForBookPage(bookId, currentPage);
+  const speed = getAverageReadingSpeed(bookId);
+  const pageKey = `${bookId}_${currentPage}`;
+  const pageSecs = currentState.pageSecondsMap[pageKey] || 0;
+
+  const totalChapterPages = Math.max(1, chapter.endPage - chapter.startPage + 1);
+  const chapterCompletedPages = Math.max(0, currentPage - chapter.startPage);
+  const chapterProgressPercent = Math.min(100, Math.round(((chapterCompletedPages + 1) / totalChapterPages) * 100));
+
+  const remainingPagesInChapter = Math.max(0, chapter.endPage - currentPage);
+  
+  let chapterRemainingSeconds = 0;
+  let chapterRemainingMinutes = 0;
+  let formattedChapterRemaining = 'أكملت الفصل 🎉';
+
+  if (remainingPagesInChapter > 0) {
+    chapterRemainingSeconds = Math.round(remainingPagesInChapter * speed.secondsPerPage);
+    chapterRemainingMinutes = Math.max(1, Math.round(chapterRemainingSeconds / 60));
+    
+    if (chapterRemainingMinutes < 60) {
+      formattedChapterRemaining = `~${chapterRemainingMinutes} د`;
+    } else {
+      const h = Math.floor(chapterRemainingMinutes / 60);
+      const m = chapterRemainingMinutes % 60;
+      formattedChapterRemaining = `~${h} س ${m > 0 ? `${m} د` : ''}`;
+    }
+  }
+
+  return {
+    sessionSeconds: currentSessionSeconds,
+    todaySeconds: currentState.todaySeconds,
+    pageSeconds: pageSecs,
+    isTimerRunning: currentState.isTimerRunning,
+    averageSecondsPerPage: speed.secondsPerPage,
+    averageMinutesPerPage: speed.minutesPerPage,
+    pagesCounted: speed.pagesCounted,
+    isSpeedEstimated: speed.isEstimated,
+    remainingPagesInChapter,
+    chapterRemainingSeconds,
+    chapterRemainingMinutes,
+    formattedSessionTime: formatFocusTime(currentSessionSeconds, 'digital'),
+    formattedChapterRemaining,
+    chapterProgressPercent,
+    chapterTitle: chapter.title,
+    chapterNumber: chapter.chapter,
+  };
 }
 
 /**
@@ -401,10 +524,10 @@ export function resetAllCurrentTimers(bookId?: BookId, pageNumber?: number) {
  */
 export function subscribeToFocusSession(callback: (state: FocusSessionState) => void): () => void {
   initFocusServiceIfNeeded();
-  callback({ ...currentState });
+  callback({ ...currentState, sessionSeconds: currentSessionSeconds });
 
   const handler = (e: any) => {
-    callback(e.detail || { ...currentState });
+    callback(e.detail || { ...currentState, sessionSeconds: currentSessionSeconds });
   };
 
   if (typeof window !== 'undefined') {
@@ -454,3 +577,4 @@ export function formatFocusTime(totalSeconds: number, format: 'digital' | 'arabi
 
   return `${minutes} د`;
 }
+

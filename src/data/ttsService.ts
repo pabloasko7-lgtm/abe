@@ -873,8 +873,10 @@ export class AccessibleTTSEngine {
           this.currentWordRange = null;
           this.playCurrentSentence();
         } else {
+          // Finished reading all sentences of current page/excerpt - stop cleanly without spilling over!
           this.isPlaying = false;
           this.isPaused = false;
+          this.currentIndex = 0;
           this.currentWordRange = null;
           this.notify();
         }

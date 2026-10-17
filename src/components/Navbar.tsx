@@ -198,10 +198,10 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   // Header styling per book
   const headerBgClass = isAntigone
-    ? 'bg-[#faf5f6]/95 dark:bg-[#15090f]/95 border-b border-rose-200/80 dark:border-[#381622]'
+    ? 'bg-[#faf5f6]/82 dark:bg-[#15090f]/85 border-b border-rose-200/80 dark:border-[#381622] backdrop-blur-2xl'
     : isCondamne
-    ? 'bg-[#f1f5f9]/95 dark:bg-[#0c121d]/95 border-b border-slate-300/80 dark:border-[#1e293b]'
-    : 'bg-amber-50/95 dark:bg-[#16120f]/95 border-b border-amber-200/70 dark:border-[#2e231c]';
+    ? 'bg-[#f1f5f9]/82 dark:bg-[#0c121d]/85 border-b border-slate-300/80 dark:border-[#1e293b] backdrop-blur-2xl'
+    : 'bg-amber-50/82 dark:bg-[#16120f]/85 border-b border-amber-200/70 dark:border-[#2e231c] backdrop-blur-2xl';
 
   const navTabActiveClass = isAntigone
     ? 'bg-rose-900 text-white dark:bg-rose-800 shadow-xs'
@@ -216,7 +216,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     : 'text-amber-900 dark:text-stone-300 hover:bg-amber-100/80 dark:hover:bg-stone-800';
 
   return (
-    <header className={`sticky top-0 z-40 ${headerBgClass} backdrop-blur-md shadow-xs transition-colors duration-300`}>
+    <header className={`sticky top-0 z-40 ${headerBgClass} ios-glass shadow-md transition-colors duration-300`}>
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2.5">
         {/* Logo & Active Book Details */}
         <div className="flex items-center gap-3">
@@ -378,36 +378,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </nav>
 
-        {/* Right Controls: Focus Session, Visual Progress Card, Night Mode Toggle, Reader Controls */}
+        {/* Right Controls: Visual Progress Card, Night Mode Toggle, Reader Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Focus Session & Daily Goal Button */}
-          {onOpenFocusSession && (
-            <button
-              id="navbar-focus-session-btn"
-              onClick={onOpenFocusSession}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-arabic transition-all duration-200 cursor-pointer shadow-xs ${
-                focusState.todaySeconds >= focusState.dailyGoalMinutes * 60
-                  ? 'bg-emerald-100/90 hover:bg-emerald-200 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/80 border-emerald-300 dark:border-emerald-800 text-emerald-950 dark:text-emerald-200'
-                  : 'bg-amber-100/90 hover:bg-amber-200/90 dark:bg-stone-800 dark:hover:bg-stone-750 border-amber-300/80 dark:border-stone-700 text-amber-950 dark:text-amber-200'
-              }`}
-              title={`جلسة التركيز والهدف اليومي: ${Math.floor(focusState.todaySeconds / 60)} من ${focusState.dailyGoalMinutes} دقيقة. اضغط لضبط الهدف ومتابعة الإنجاز.`}
-            >
-              <div className="relative flex items-center justify-center">
-                <Timer className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-                <span
-                  className={`absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full ${
-                    focusState.isTimerRunning ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                  }`}
-                />
-              </div>
-              <span className="font-mono font-bold text-xs">
-                {Math.floor(focusState.todaySeconds / 60)}/{focusState.dailyGoalMinutes}د
-              </span>
-              <span className="hidden xl:inline-block text-[10px] text-amber-900/80 dark:text-stone-400 font-bold border-r border-amber-300/60 dark:border-stone-700 pr-1 mr-0.5">
-                {focusState.todaySeconds >= focusState.dailyGoalMinutes * 60 ? '✓ تم' : `${Math.min(100, Math.round((focusState.todaySeconds / (focusState.dailyGoalMinutes * 60)) * 100))}%`}
-              </span>
-            </button>
-          )}
 
           {/* Interactive Visual Reading Progress Button / Card */}
           <div className="relative" ref={progressCardRef}>
