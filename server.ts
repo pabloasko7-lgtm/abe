@@ -178,9 +178,9 @@ function cleanDirectArabicTranslation(text: string): string {
   // 2. Remove markdown horizontal rules and anything following (e.g. *** or --- followed by headers)
   cleaned = cleaned.replace(/\s*(?:\*\*\*|---|___)\s*[\r\n]+[\s\S]*$/gi, "");
 
-  // 3. Remove section headers and whatever follows (figures de style, vocab analysis, notes)
-  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:\*\*|#|\b)(?:تحليل المفردات|الصور البيانية|المحسنات البديعية|المحسن البديعي|ملاحظات بلاغية|ملاحظات|Figures?\s*de\s*styles?|Figures?\s*de\s*style|Analyse\s*littéraire)[\s\S]*$/gi, "");
-  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:\*\*|#|\b)(?:ملاحظة|تنبيه|إيضاح)\s*:[\s\S]*$/gi, "");
+  // 3. Remove markdown headers for notes/figures ONLY (do NOT match normal words inside sentences)
+  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:#{1,6}|\*{2,3})\s*(?:تحليل المفردات|الصور البيانية|المحسنات البديعية|المحسن البديعي|ملاحظات بلاغية|Figures?\s*de\s*styles?|Analyse\s*littéraire)[\s\S]*$/gi, "");
+  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:#{1,6}|\*{2,3})\s*(?:ملاحظة|تنبيه|إيضاح)\s*:?[\s\S]*$/gi, "");
 
   // 4. Remove standalone bullet lists of vocabulary if they start with * **
   cleaned = cleaned.replace(/(?:\r?\n)+\s*\*\s*\*\*[^*]+\*\*:\s*[\s\S]*$/g, "");
@@ -590,6 +590,26 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
 }
 
+// Safe JSON parser that strips markdown codeblocks or extracts JSON
+function parseJsonResponse(raw: string): any {
+  if (!raw) return {};
+  let cleaned = raw.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  }
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch {}
+    }
+    throw err;
+  }
+}
+
 // Helper for resilient Gemini API calls across models during high-demand spikes
 async function generateContentWithFallback(
   ai: GoogleGenAI,
@@ -600,8 +620,14 @@ async function generateContentWithFallback(
     temperature?: number;
   }
 ): Promise<string> {
-  // Rotate smoothly across fast, high-quality models with extended timeout and multi-pass retry
-  const candidateModels = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  // Rotate smoothly across fast, high-quality models with gemini-flash-lite-latest first for lightning speed & high quota
+  const candidateModels = [
+    "gemini-flash-lite-latest",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-3.8-flash"
+  ];
   let lastError: any = null;
 
   for (let pass = 0; pass < 2; pass++) {
@@ -617,7 +643,7 @@ async function generateContentWithFallback(
               temperature: config.temperature,
             },
           }),
-          15000,
+          10000,
           model
         );
 
@@ -641,7 +667,7 @@ async function generateContentWithFallback(
     }
     // Brief delay before second pass if all candidate models experienced temporary load
     if (pass === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise((resolve) => setTimeout(resolve, 600));
     }
   }
 
@@ -1007,9 +1033,9 @@ Translate this exact text block into pristine Modern Standard Arabic without any
             });
 
             let cleanArabic = chunkResponse ? chunkResponse.trim() : "";
-            if (cleanArabic.startsWith("{") && cleanArabic.endsWith("}")) {
+            if (cleanArabic.includes("{") && cleanArabic.includes("}")) {
               try {
-                const j = JSON.parse(cleanArabic);
+                const j = parseJsonResponse(cleanArabic);
                 cleanArabic = j.arabicTranslation || cleanArabic;
               } catch (_) {}
             }
@@ -1107,8 +1133,11 @@ Selection Type: ${detectedType}
 Return a valid JSON object strictly matching this schema:
 {
   "type": "${detectedType}",
-  "originalText": ${JSON.stringify(trimmedText)},
-  "arabicTranslation": "string (MANDATORY: pristine, direct Modern Standard Arabic translation of EVERY SINGLE PARAGRAPH AND SENTENCE from start to finish. Complete verbatim full page translation with ZERO omissions, ZERO shortcuts, and ZERO figure de style notes!)",
+  "arabicTranslation": "string (MANDATORY: pristine, direct Modern Standard Arabic translation of EVERY SINGLE PARAGRAPH AND SENTENCE from start to finish. Complete verbatim full text translation with ZERO omissions, ZERO shortcuts, and ZERO figure de style notes!)",
+  "literaryAnalysis": {
+    "figureDeStyle": "string (e.g. Métaphore, Comparaison, Hyperbole, Antithèse, Personnification, or 'Aucune')",
+    "explanation": "string in Arabic explaining this literary device for the 1st Bac exam"
+  },
   "wordDetails": {
     "primaryArabic": "string",
     "partOfSpeech": "string (e.g. اسم / فعل / صفة)",
@@ -1117,23 +1146,9 @@ Return a valid JSON object strictly matching this schema:
     "alternativeMeanings": ["string"],
     "exampleContextFrench": "string",
     "exampleContextArabic": "string"
-  },
-  "sideBySide": {
-    "french": ${JSON.stringify(trimmedText)},
-    "arabic": "string (ONLY the direct Arabic translation matching the French text, no figures of style notes here)"
-  },
-  "literaryAnalysis": {
-    "figureDeStyle": "string (e.g. Métaphore, Comparaison, Hyperbole, Antithèse, Personnification, or 'Aucune')",
-    "explanation": "string in Arabic explaining this literary device for the 1st Bac exam"
-  },
-  "selfVerification": {
-    "passed": true,
-    "completenessRatio": 100,
-    "rule1Check": true,
-    "rule2Check": true,
-    "notes": "تمت الترجمة النصية الفصحى المباشرة لجميع الجمل دون أي حذف أو تقديم تلخيصي."
   }
-}`;
+}
+Note: Return ONLY valid JSON. Do not duplicate the Arabic text.`;
 
       responseText = await generateContentWithFallback(ai, {
         contents: userPrompt,
@@ -1160,20 +1175,26 @@ Return a valid JSON object strictly matching this schema:
 
     let parsed: any;
     try {
-      parsed = JSON.parse(responseText);
+      parsed = parseJsonResponse(responseText);
     } catch (e) {
+      let rawArabic = responseText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
       parsed = {
         type: detectedType,
         originalText: trimmedText,
-        arabicTranslation: responseText,
+        arabicTranslation: rawArabic,
         selfVerification: {
           passed: true,
           completenessRatio: 100,
           rule1Check: true,
           rule2Check: true,
-          notes: "تمت الترجمة السياقية بنجاح مع الفحص الآلي."
+          notes: "تمت الترجمة السياقية الفصحى بنجاح."
         }
       };
+    }
+
+    // Ensure arabicTranslation is a string
+    if (typeof parsed.arabicTranslation !== "string" && parsed.arabicTranslation) {
+      parsed.arabicTranslation = String(parsed.arabicTranslation);
     }
 
     // Extract figure of style if accidentally embedded in arabicTranslation before stripping
@@ -1189,9 +1210,12 @@ Return a valid JSON object strictly matching this schema:
 
     // 100% PURIFY translation: ABSOLUTELY NO figure de style notes, no markdown tables, no commentary in arabicTranslation!
     parsed.arabicTranslation = cleanDirectArabicTranslation(parsed.arabicTranslation);
-    if (parsed.sideBySide && parsed.sideBySide.arabic) {
-      parsed.sideBySide.arabic = cleanDirectArabicTranslation(parsed.sideBySide.arabic);
-    }
+    parsed.originalText = trimmedText;
+    parsed.type = detectedType;
+    parsed.sideBySide = {
+      french: trimmedText,
+      arabic: parsed.arabicTranslation,
+    };
 
     // Ensure translationMode is attached
     parsed.translationMode = activeTranslationMode;
@@ -1223,11 +1247,18 @@ Return a valid JSON object strictly matching this schema:
           }
         }
 
-        if (!ar || /[a-zA-Z]/.test(ar)) {
-          ar = synthesizeServerFrenchSentence(cleanTok);
+        if (!ar || /[a-zA-Z]/.test(ar) || ar.includes('نص روائي بالفرنسية')) {
+          if (detectedType === "WORD" && parsed.arabicTranslation) {
+            ar = parsed.wordDetails?.primaryArabic || parsed.arabicTranslation;
+          } else {
+            ar = synthesizeServerFrenchSentence(cleanTok);
+            if (ar.includes('نص روائي بالفرنسية') || /[a-zA-Z]/.test(ar)) {
+              ar = `المعنى السياقي لمفردة "${cleanTok}"`;
+            }
+          }
         }
-        if (!ar || /[a-zA-Z]/.test(ar) || ar.includes('ترجمة أدبية')) {
-          ar = `المعنى السياقي لمفردة "${cleanTok}"`;
+        if (!ar || /[a-zA-Z]/.test(ar) || ar.includes('ترجمة أدبية') || ar.includes('نص روائي بالفرنسية')) {
+          ar = parsed.arabicTranslation || `المعنى السياقي لمفردة "${cleanTok}"`;
         }
 
         return {
@@ -1672,28 +1703,6 @@ const serverAudioCache = new Map<string, Buffer>();
 // Valid prebuilt voices supported by gemini-3.8-flash-lite-tts
 const VALID_GEMINI_TTS_VOICES = ["Puck", "Charon", "Kore", "Fenrir", "Zephyr"];
 
-app.post("/api/translate", async (req, res) => {
-  const { text, language = "ar" } = req.body;
-  if (!text) return res.status(400).json({ error: "Text is required" });
-  
-  const ai = getGeminiClient();
-  if (!ai) return res.status(500).json({ error: "AI client unavailable" });
-  
-  try {
-    const textResult = await generateContentWithFallback(ai, {
-      contents: `Translate this text to ${language}: "${text}". Respond with a JSON object that has a field 'arabicTranslation' for the translation.`,
-      responseMimeType: "application/json",
-    });
-    return res.json(JSON.parse(textResult || "{}"));
-  } catch (e: any) {
-    console.log("[Translation Fallback] Serving fallback because Gemini failed:", e?.message || e);
-    return res.json({
-      arabicTranslation: text,
-      fallbackUsed: true,
-      message: "Translation service temporarily rate-limited or busy, showing original text"
-    });
-  }
-});
 
 // 6. High-Fidelity Human-Like Gemini AI Text-To-Speech (TTS) Endpoint
 app.post("/api/tts", async (req, res) => {

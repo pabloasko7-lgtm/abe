@@ -22,6 +22,7 @@ import {
   setCachedTranslation,
   getLatestPageTranslation,
   setLatestPageTranslation,
+  isPlaceholderOrInvalidTranslation,
 } from './data/translationCache';
 import { validateTranslationBareme } from './data/baremeTraduction';
 import {
@@ -461,23 +462,19 @@ function AppContent() {
         selectionType: words.length <= 1 ? 'WORD' : (words.length <= 40 ? 'SENTENCE' : 'PARAGRAPH'),
       });
       
-      if (data && data.arabicTranslation) {
-        const bareme = validateTranslationBareme(trimmed, data.arabicTranslation);
-        if (bareme.isOverExpanded && !instantData.selfVerification?.autoCorrected) {
-          console.warn('[Translation Barème] Server response over-expanded beyond target interval, preserving strictly bounded local translation.');
-          setCachedTranslation(currentBook, pageNumber, trimmed, instantData, activeMode, false);
-        } else {
-          updateTranslationCleanly(data);
-          setCachedTranslation(currentBook, pageNumber, trimmed, data, activeMode, false);
-          if (isFullPage) {
-            setLatestPageTranslation(currentBook, pageNumber, data);
-          }
+      if (data && data.arabicTranslation && !isPlaceholderOrInvalidTranslation(data.arabicTranslation)) {
+        updateTranslationCleanly(data);
+        setCachedTranslation(currentBook, pageNumber, trimmed, data, activeMode, false);
+        if (isFullPage) {
+          setLatestPageTranslation(currentBook, pageNumber, data);
         }
       }
     } catch (err: any) {
       console.warn('API translation background fallback active:', err);
-      // Instant verified data remains active; cache it locally
-      setCachedTranslation(currentBook, pageNumber, trimmed, instantData, activeMode, false);
+      // Only cache instantData if it is an authentic known curriculum translation
+      if (instantData && !isPlaceholderOrInvalidTranslation(instantData.arabicTranslation)) {
+        setCachedTranslation(currentBook, pageNumber, trimmed, instantData, activeMode, false);
+      }
     } finally {
       setIsTranslating(false);
     }

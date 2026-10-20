@@ -1,8 +1,22 @@
 import { TranslationResponse, TranslationMode } from '../types';
 
 /**
+ * Checks whether an Arabic translation string is an invalid placeholder or corrupted data.
+ */
+export function isPlaceholderOrInvalidTranslation(text: string): boolean {
+  if (!text || typeof text !== 'string') return true;
+  const t = text.trim();
+  if (t.length < 5) return true;
+  if (t.includes('نص روائي بالفرنسية من مقرر الامتحان الجهوي')) return true;
+  if (t.includes('المعنى السياقي لمفردة "') && !t.includes('.')) return true;
+  if (t.startsWith('```json') || t.startsWith('{ "type":') || t.startsWith('{"type":')) return true;
+  if (t.includes('"arabicTranslation":') && t.includes('"originalText":')) return true;
+  return false;
+}
+
+/**
  * Strips any leaked figure de style notes, vocabulary tables, or dividers
- * from the Arabic translation text.
+ * from the Arabic translation text without wiping out authentic narrative sentences.
  */
 export function cleanDirectArabicTranslation(text: string): string {
   if (!text || typeof text !== 'string') return '';
@@ -14,9 +28,9 @@ export function cleanDirectArabicTranslation(text: string): string {
   // 2. Remove markdown horizontal rules and anything following (e.g. *** or --- followed by headers)
   cleaned = cleaned.replace(/\s*(?:\*\*\*|---|___)\s*[\r\n]+[\s\S]*$/gi, '');
 
-  // 3. Remove section headers and whatever follows (figures de style, vocab analysis, notes)
-  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:\*\*|#|\b)(?:تحليل المفردات|الصور البيانية|المحسنات البديعية|المحسن البديعي|ملاحظات بلاغية|ملاحظات|Figures?\s*de\s*styles?|Figures?\s*de\s*style|Analyse\s*littéraire)[\s\S]*$/gi, '');
-  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:\*\*|#|\b)(?:ملاحظة|تنبيه|إيضاح)\s*:[\s\S]*$/gi, '');
+  // 3. Remove markdown headers for notes/figures ONLY (do NOT match normal words inside sentences)
+  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:#{1,6}|\*{2,3})\s*(?:تحليل المفردات|الصور البيانية|المحسنات البديعية|المحسن البديعي|ملاحظات بلاغية|Figures?\s*de\s*styles?|Analyse\s*littéraire)[\s\S]*$/gi, '');
+  cleaned = cleaned.replace(/(?:\r?\n)+\s*(?:#{1,6}|\*{2,3})\s*(?:ملاحظة|تنبيه|إيضاح)\s*:?[\s\S]*$/gi, '');
 
   // 4. Remove standalone bullet lists of vocabulary if they start with * **
   cleaned = cleaned.replace(/(?:\r?\n)+\s*\*\s*\*\*[^*]+\*\*:\s*[\s\S]*$/g, '');
@@ -142,6 +156,11 @@ export function getCachedTranslation(
 
     const data: TranslationResponse = JSON.parse(raw);
     if (data && data.arabicTranslation && data.originalText) {
+      // Auto-purge placeholder or invalid/corrupted translations
+      if (isPlaceholderOrInvalidTranslation(data.arabicTranslation)) {
+        localStorage.removeItem(key);
+        return null;
+      }
       // Validate completeness: for full paragraphs/pages, reject truncated cache entries
       const srcWords = data.originalText.trim().split(/\s+/).filter(Boolean).length;
       const arWords = data.arabicTranslation.trim().split(/\s+/).filter(Boolean).length;
@@ -170,6 +189,8 @@ export function setCachedTranslation(
   isExpanded?: boolean
 ): void {
   if (!text || !data || !data.arabicTranslation || typeof window === 'undefined' || !window.localStorage) return;
+  // NEVER cache placeholders or corrupt text
+  if (isPlaceholderOrInvalidTranslation(data.arabicTranslation)) return;
 
   const sanitized = sanitizeTranslationResponse(data);
   const key = buildTranslationCacheKey(bookId, pageNumber, text, mode, isExpanded);
@@ -220,6 +241,11 @@ export function getLatestPageTranslation(bookId: string, pageNumber: number): Tr
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (data && data.arabicTranslation && data.originalText) {
+      // Auto-purge placeholder or invalid/corrupted translations
+      if (isPlaceholderOrInvalidTranslation(data.arabicTranslation)) {
+        localStorage.removeItem(pageKey);
+        return null;
+      }
       const srcWords = data.originalText.trim().split(/\s+/).filter(Boolean).length;
       const arWords = data.arabicTranslation.trim().split(/\s+/).filter(Boolean).length;
       if (srcWords > 80 && arWords < srcWords * 0.35) {
@@ -237,7 +263,9 @@ export function getLatestPageTranslation(bookId: string, pageNumber: number): Tr
  * Saves the latest translation for a specific page.
  */
 export function setLatestPageTranslation(bookId: string, pageNumber: number, data: TranslationResponse): void {
-  if (typeof window === 'undefined' || !window.localStorage || !data) return;
+  if (typeof window === 'undefined' || !window.localStorage || !data || !data.arabicTranslation) return;
+  // NEVER save placeholders to page cache
+  if (isPlaceholderOrInvalidTranslation(data.arabicTranslation)) return;
   try {
     const sanitized = sanitizeTranslationResponse(data);
     const pageKey = `${PAGE_LATEST_PREFIX}${bookId}:p${pageNumber}`;

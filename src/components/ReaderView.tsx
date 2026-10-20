@@ -59,6 +59,7 @@ import {
   getLatestPageTranslation,
   setLatestPageTranslation,
   cleanDirectArabicTranslation,
+  isPlaceholderOrInvalidTranslation,
 } from '../data/translationCache';
 import { generateInstantTranslation } from '../data/translationsDict';
 import { autoSaveWordTranslation } from '../data/vocabularyService';
@@ -663,16 +664,18 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
       getCachedTranslation(currentBookId, pageNum, fullText, 'full-sentence', false) ||
       getLatestPageTranslation(currentBookId, pageNum);
 
-    if (cached && cached.arabicTranslation) {
+    if (cached && cached.arabicTranslation && !isPlaceholderOrInvalidTranslation(cached.arabicTranslation)) {
       setPreloadedArabicText(cached.arabicTranslation);
       return;
     }
 
-    // 2. Generate instant accurate translation immediately so it's always ready with 0ms wait
+    // 2. Generate instant accurate translation if authentic known curriculum text
     const instant = generateInstantTranslation(fullText, fullText, pageNum, 'full-sentence');
-    if (isCurrent && instant.arabicTranslation) {
+    if (isCurrent && instant.arabicTranslation && !isPlaceholderOrInvalidTranslation(instant.arabicTranslation)) {
       setPreloadedArabicText(instant.arabicTranslation);
-      setLatestPageTranslation(currentBookId, pageNum, instant);
+      if (!instant.arabicTranslation.includes('نص روائي بالفرنسية')) {
+        setLatestPageTranslation(currentBookId, pageNum, instant);
+      }
     }
 
     // 3. Silent background fetch to enhance and cache
@@ -691,7 +694,7 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data: TranslationResponse | null) => {
-        if (isCurrent && data && data.arabicTranslation) {
+        if (isCurrent && data && data.arabicTranslation && !isPlaceholderOrInvalidTranslation(data.arabicTranslation)) {
           setPreloadedArabicText(data.arabicTranslation);
           setCachedTranslation(currentBookId, pageNum, fullText, data, 'full-sentence', false);
           setLatestPageTranslation(currentBookId, pageNum, data);
@@ -723,20 +726,20 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
     let targetArabic = '';
     
     // Priority 0: Active translation already loaded/visible for this page
-    if (activeTranslation && activeTranslation.arabicTranslation && activeTranslation.arabicTranslation.trim().length > 15) {
+    if (activeTranslation && activeTranslation.arabicTranslation && activeTranslation.arabicTranslation.trim().length > 15 && !isPlaceholderOrInvalidTranslation(activeTranslation.arabicTranslation)) {
       targetArabic = activeTranslation.arabicTranslation;
     } else {
       const cached =
         getCachedTranslation(currentBookId, pageNum, pageText, 'full-sentence', false) ||
         getLatestPageTranslation(currentBookId, pageNum);
 
-      if (cached && cached.arabicTranslation) {
+      if (cached && cached.arabicTranslation && !isPlaceholderOrInvalidTranslation(cached.arabicTranslation)) {
         targetArabic = cached.arabicTranslation;
-      } else if (preloadedArabicText && preloadedArabicText.trim().length > 20) {
+      } else if (preloadedArabicText && preloadedArabicText.trim().length > 20 && !isPlaceholderOrInvalidTranslation(preloadedArabicText)) {
         targetArabic = preloadedArabicText;
       } else {
         const instant = generateInstantTranslation(pageText, pageText, pageNum, 'full-sentence');
-        if (instant && instant.arabicTranslation && instant.arabicTranslation.length > 30) {
+        if (instant && instant.arabicTranslation && instant.arabicTranslation.length > 30 && !isPlaceholderOrInvalidTranslation(instant.arabicTranslation)) {
           targetArabic = instant.arabicTranslation;
         }
       }
