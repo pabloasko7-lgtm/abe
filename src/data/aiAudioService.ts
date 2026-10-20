@@ -6,8 +6,6 @@
 
 import { accessibleTTS, splitParagraphsIntoSentences } from './ttsService';
 
-let isQuotaExhaustedClient = false;
-
 export interface AIAudioState {
   isPlaying: boolean;
   isPaused: boolean;
@@ -127,12 +125,6 @@ export async function playArabicAIAudio(
 
   let audioUrl = audioCache.get(cacheKey) || null;
 
-  // If quota was already detected as exhausted, fall back to Web Speech without waiting for network
-  if (!audioUrl && isQuotaExhaustedClient) {
-    fallbackToWebSpeech(cleanText, label, sentences);
-    return;
-  }
-
   if (!audioUrl) {
     currentAbortController = new AbortController();
     try {
@@ -151,9 +143,6 @@ export async function playArabicAIAudio(
 
       if (res.ok) {
         const data = await res.json();
-        if (data.quotaExceeded) {
-          isQuotaExhaustedClient = true;
-        }
         if (data.success && data.audioBase64) {
           audioUrl = `data:audio/wav;base64,${data.audioBase64}`;
           audioCache.set(cacheKey, audioUrl);

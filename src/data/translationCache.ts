@@ -188,8 +188,12 @@ export function setCachedTranslation(
       setTrackedKeys(keys);
     }
 
-    // Also update the latest translation for this page
-    setLatestPageTranslation(bookId, pageNumber, sanitized);
+    // Only update the whole-page latest translation if this is genuinely a full page translation
+    // to prevent partial divided leaves (أوراق مقسمة) or snippets from overriding full page cache
+    const srcWords = (sanitized.originalText || '').trim().split(/\s+/).filter(Boolean).length;
+    if (sanitized.type === 'PARAGRAPH' && srcWords >= 220) {
+      setLatestPageTranslation(bookId, pageNumber, sanitized);
+    }
   } catch (e: any) {
     // QuotaExceededError handling
     console.warn('[Translation Cache] LocalStorage quota exceeded, pruning old entries and retrying...', e);

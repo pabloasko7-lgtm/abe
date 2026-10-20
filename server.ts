@@ -1668,8 +1668,6 @@ function pcmToWav(pcmBuffer: Buffer, sampleRate = 24000, numChannels = 1, bitsPe
 }
 
 const serverAudioCache = new Map<string, Buffer>();
-// Cooldown timestamp to gracefully avoid API hammering when free-tier TTS quota is reached
-let ttsQuotaCooldownUntil = 0;
 
 // Valid prebuilt voices supported by gemini-3.8-flash-lite-tts
 const VALID_GEMINI_TTS_VOICES = ["Puck", "Charon", "Kore", "Fenrir", "Zephyr"];
@@ -1682,16 +1680,18 @@ app.post("/api/translate", async (req, res) => {
   if (!ai) return res.status(500).json({ error: "AI client unavailable" });
   
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
+    const textResult = await generateContentWithFallback(ai, {
       contents: `Translate this text to ${language}: "${text}". Respond with a JSON object that has a field 'arabicTranslation' for the translation.`,
-      config: {
-        responseMimeType: "application/json",
-      }
+      responseMimeType: "application/json",
     });
-    return res.json(JSON.parse(response.text || "{}"));
-  } catch (e) {
-    return res.status(500).json({ error: "Translation failed" });
+    return res.json(JSON.parse(textResult || "{}"));
+  } catch (e: any) {
+    console.log("[Translation Fallback] Serving fallback because Gemini failed:", e?.message || e);
+    return res.json({
+      arabicTranslation: text,
+      fallbackUsed: true,
+      message: "Translation service temporarily rate-limited or busy, showing original text"
+    });
   }
 });
 
@@ -1723,16 +1723,6 @@ app.post("/api/tts", async (req, res) => {
       });
     }
 
-    // If quota cooldown is active, return fallback cleanly without logging errors
-    if (Date.now() < ttsQuotaCooldownUntil) {
-      return res.json({
-        success: false,
-        fallbackToBrowser: true,
-        quotaExceeded: true,
-        message: "Gemini TTS quota limit reached, seamlessly using high-quality browser speech synthesis.",
-      });
-    }
-
     const ai = getGeminiClient();
     if (!ai) {
       return res.json({ success: false, fallbackToBrowser: true, message: "AI client unavailable" });
@@ -1746,40 +1736,61 @@ app.post("/api/tts", async (req, res) => {
       ? "Clear, warm, expressive, calm and natural Arabic literary narrator with precise classical pronunciation"
       : "Eloquent, clear and gentle French novel storyteller";
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash-lite-tts",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: cleanText,
-              speechMetadata: {
-                style: styleDescription,
+    const candidateTTSModels = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-3.8-flash", "gemini-flash-latest"];
+    let response: any = null;
+
+    for (const modelCandidate of candidateTTSModels) {
+      let attempts = 0;
+      while (attempts < 2) {
+        try {
+          attempts++;
+          response = await ai.models.generateContent({
+            model: modelCandidate,
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: cleanText,
+                    speechMetadata: {
+                      style: styleDescription,
+                    },
+                  },
+                ],
+              },
+            ],
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: selectedVoice },
+                },
               },
             },
-          ],
-        },
-      ],
-      config: {
-        responseModalities: ["AUDIO"],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: selectedVoice },
-          },
-        },
-      },
-    });
+          });
+          break;
+        } catch (err: any) {
+          if (attempts < 2 && (err?.status === 429 || String(err).includes("429"))) {
+            await new Promise((r) => setTimeout(r, 1200));
+          } else {
+            break;
+          }
+        }
+      }
+      if (response?.candidates?.[0]?.content?.parts?.[0]?.inlineData) {
+        break;
+      }
+    }
 
-    const audioPart = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+    const audioPart = response?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
     if (audioPart && audioPart.data) {
       const audioBuffer = Buffer.from(audioPart.data, "base64");
       // Unary generateContent delivers a complete WAV file with RIFF header; wrap only if header missing
       const hasRiff = audioBuffer.length >= 4 && audioBuffer.toString("ascii", 0, 4) === "RIFF";
       const wavBuffer = hasRiff ? audioBuffer : pcmToWav(audioBuffer, 24000, 1, 16);
 
-      // Keep up to 100 audio files in server memory
-      if (serverAudioCache.size > 100) {
+      // Keep up to 500 audio files in server memory
+      if (serverAudioCache.size > 500) {
         const firstKey = serverAudioCache.keys().next().value;
         if (firstKey) serverAudioCache.delete(firstKey);
       }
@@ -1793,32 +1804,100 @@ app.post("/api/tts", async (req, res) => {
       });
     }
 
-    return res.json({ success: false, fallbackToBrowser: true });
-  } catch (error: any) {
-    const errorMsg = error?.message || String(error);
-    const isQuotaExhausted =
-      error?.status === 429 ||
-      errorMsg.includes("429") ||
-      errorMsg.includes("RESOURCE_EXHAUSTED") ||
-      errorMsg.includes("quota") ||
-      errorMsg.includes("Quota exceeded");
-
-    if (isQuotaExhausted) {
-      // Cooldown for 2 hours to prevent repeated API rejections
-      ttsQuotaCooldownUntil = Date.now() + 2 * 60 * 60 * 1000;
-      return res.json({
-        success: false,
-        fallbackToBrowser: true,
-        quotaExceeded: true,
-        message: "Gemini TTS daily quota limit reached, fallback to browser speech synthesis engine.",
-      });
-    }
-
     return res.json({
       success: false,
       fallbackToBrowser: true,
-      error: "TTS unavailable, falling back to browser speech synthesis",
+      quotaExceeded: true,
+      message: "TTS smoothly falling back to high-quality browser speech synthesis",
     });
+  } catch (_error: any) {
+    return res.json({
+      success: false,
+      fallbackToBrowser: true,
+      quotaExceeded: true,
+      message: "TTS unavailable, falling back to browser speech synthesis",
+    });
+  }
+});
+
+// 7. ElevenLabs API Proxy (Free Tier & User Keys)
+app.get("/api/elevenlabs/user", async (req, res) => {
+  const apiKey = (req.headers["xi-api-key"] as string) || process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    return res.status(401).json({ error: "Missing API key" });
+  }
+
+  try {
+    const userRes = await fetch("https://api.elevenlabs.io/v1/user/subscription", {
+      headers: { "xi-api-key": apiKey },
+    });
+    if (!userRes.ok) {
+      return res.status(userRes.status).json({ error: "Invalid API key" });
+    }
+    const data = await userRes.json();
+    return res.json({
+      configured: true,
+      validKey: true,
+      tier: data.tier || "free",
+      characterCount: data.character_count || 0,
+      characterLimit: data.character_limit || 10000,
+      remainingCharacters: Math.max(0, (data.character_limit || 10000) - (data.character_count || 0)),
+      percentUsed: Math.min(100, Math.round(((data.character_count || 0) / (data.character_limit || 10000)) * 100)),
+      nextResetUnix: data.next_character_count_reset_unix,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "Failed to contact ElevenLabs" });
+  }
+});
+
+app.post("/api/elevenlabs/tts", async (req, res) => {
+  const apiKey = (req.headers["xi-api-key"] as string) || req.body?.clientApiKey || process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    return res.status(401).json({ error: "INVALID_KEY", message: "Missing ElevenLabs API key", fallbackToBrowser: true });
+  }
+
+  const { text, voiceId = "21m00Tcm4TlvDq8ikWAM", modelId = "eleven_multilingual_v2", voiceSettings } = req.body;
+  if (!text) {
+    return res.status(400).json({ error: "NO_TEXT" });
+  }
+
+  try {
+    const elvRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "xi-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        text,
+        model_id: modelId,
+        voice_settings: voiceSettings || {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      }),
+    });
+
+    if (elvRes.status === 401 || elvRes.status === 403) {
+      return res.json({ success: false, error: "INVALID_KEY", fallbackToBrowser: true });
+    }
+    if (elvRes.status === 429) {
+      return res.json({ success: false, error: "QUOTA_EXCEEDED", fallbackToBrowser: true });
+    }
+    if (!elvRes.ok) {
+      const errText = await elvRes.text();
+      return res.json({ success: false, error: "ELV_ERROR", message: errText, fallbackToBrowser: true });
+    }
+
+    const arrayBuffer = await elvRes.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return res.json({
+      success: true,
+      audioBase64: buffer.toString("base64"),
+      mimeType: "audio/mpeg",
+    });
+  } catch (err: any) {
+    return res.json({ success: false, error: err?.message, fallbackToBrowser: true });
   }
 });
 

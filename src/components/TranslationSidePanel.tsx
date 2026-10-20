@@ -196,7 +196,13 @@ export const TranslationSidePanel: React.FC<TranslationSidePanelProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="px-2 py-0.5 rounded-full bg-emerald-700/80 text-[10px] font-mono font-bold uppercase tracking-wider text-emerald-100">
-                {isWord ? 'مفردة واحدة (Mot)' : isSentence ? 'جملة تامة (Phrase)' : 'فقرة كاملة (Paragraphe)'}
+                {isWord
+                  ? 'مفردة واحدة (Mot)'
+                  : isSentence
+                  ? 'جملة تامة (Phrase)'
+                  : (translation.originalText && translation.originalText.split(/\s+/).filter(Boolean).length < 200)
+                  ? `ورقة مقسمة (${translation.originalText.split(/\s+/).filter(Boolean).length} كلمة)`
+                  : 'صفحة كاملة (Page)'}
               </span>
               <span className="text-[11px] font-arabic text-emerald-200">
                 الصفحة {pageNumber}

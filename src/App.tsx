@@ -23,6 +23,7 @@ import {
   getLatestPageTranslation,
   setLatestPageTranslation,
 } from './data/translationCache';
+import { validateTranslationBareme } from './data/baremeTraduction';
 import {
   warmUpSpeechEngine,
   getFrenchVoiceOptions,
@@ -166,6 +167,39 @@ function AppContent() {
   const toggleDarkMode = () => {
     setIsDarkMode((prev) => !prev);
   };
+
+  // Scroll motion blur effect with requestAnimationFrame throttling for zero jank 60/120 FPS smoothness
+  useEffect(() => {
+    let lastScrollY = window.scrollY;
+    let ticking = false;
+    let scrollTimeout: NodeJS.Timeout;
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      const scrollDelta = Math.abs(currentScrollY - lastScrollY);
+      lastScrollY = currentScrollY;
+
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const blurAmount = Math.min(scrollDelta * 0.2, 3.0);
+          document.documentElement.style.setProperty('--scroll-blur', `${blurAmount}px`);
+          ticking = false;
+        });
+        ticking = true;
+      }
+
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        document.documentElement.style.setProperty('--scroll-blur', '0px');
+      }, 90);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearTimeout(scrollTimeout);
+    };
+  }, []);
 
   // Multi-book state persistence
   const [currentBook, setCurrentBook] = useState<BookId>(() => {
@@ -334,9 +368,9 @@ function AppContent() {
       return updated;
     });
 
-    // Re-visiting the same page: trigger instant clean retrieval from localStorage
-    const pageCachedTrans = getLatestPageTranslation(currentBook, clamped);
-    updateTranslationCleanly(pageCachedTrans);
+    // Re-visiting page: keep clean reading state on page change
+    // User can trigger translation explicitly for the current pocket leaf or full page
+    updateTranslationCleanly(null);
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -359,7 +393,7 @@ function AppContent() {
     );
   };
 
-  // Immediate Non-Blank Translation Execution: Checks localStorage cache first for instant retrieval
+  // Immediate Non-Blank Translation Execution with Barème de Traduction
   const handleTranslateSelection = async (
     selectedText: string,
     context: string,
@@ -371,32 +405,31 @@ function AppContent() {
 
     stopAllTTS();
 
-    // Apply robust token limiter: For initial page analysis/full-page triggers, force 500-character snippet truncation
-    // to strictly lock the translator to the target paragraph and avoid multi-page spillover
     const words = rawTrimmed.split(/\s+/).filter(Boolean);
+    const isShortSelection = rawTrimmed.length < 100;
     const activeMode: TranslationMode =
-      translationMode || (words.length <= 1 ? 'word-by-word' : 'full-sentence');
+      translationMode || (isShortSelection ? (words.length <= 1 ? 'word-by-word' : 'full-sentence') : 'full-sentence');
 
-    // Do not truncate if full-sentence (full page / paragraph) mode is active, ensuring 100% complete page translation
-    const isFullPageOrSentence = activeMode === 'full-sentence';
-    const tokenLimitResult = isFullPageOrSentence
-      ? { truncatedText: rawTrimmed, isTruncated: false, originalCharCount: rawTrimmed.length, truncatedCharCount: rawTrimmed.length }
-      : (rawTrimmed.length > INITIAL_PAGE_ANALYSIS_CHAR_LIMIT
-          ? applyTranslationTokenLimiter(rawTrimmed, INITIAL_PAGE_ANALYSIS_CHAR_LIMIT)
-          : { truncatedText: rawTrimmed, isTruncated: false, originalCharCount: rawTrimmed.length, truncatedCharCount: rawTrimmed.length });
+    // Check whether the request is genuinely the whole novel page or a divided leaf/snippet
+    const activePageData = getPage(currentBook, pageNumber);
+    const pageFullText = (activePageData.text || '').trim();
+    const isFullPage =
+      words.length >= 220 ||
+      (pageFullText.length > 0 && rawTrimmed.length >= pageFullText.length * 0.85);
 
-    const trimmed = tokenLimitResult.truncatedText;
+    const trimmed = rawTrimmed;
 
     // Clamp context strictly to 500-character bounded snippet to prevent multi-page context leakage
-    const activePageData = getPage(currentBook, pageNumber);
-    const rawContext = context || activePageData.text || '';
+    const rawContext = context || pageFullText || '';
     const safeContext = applyTranslationTokenLimiter(rawContext, INITIAL_PAGE_ANALYSIS_CHAR_LIMIT).truncatedText;
 
     // 1. Check localStorage translation cache first: instant local retrieval!
     const cached = getCachedTranslation(currentBook, pageNumber, trimmed, activeMode, false);
     if (cached) {
       updateTranslationCleanly(cached);
-      setLatestPageTranslation(currentBook, pageNumber, cached);
+      if (isFullPage) {
+        setLatestPageTranslation(currentBook, pageNumber, cached);
+      }
       setCurrentView('reader');
       setIsTranslating(true);
       setTranslationError(null);
@@ -406,35 +439,39 @@ function AppContent() {
       return; // Instant local retrieval with visible progress confirmation
     }
 
-    // 2. Instantly populate translation so it is NEVER blank or hidden
+    // 2. Instantly populate translation using strict Barème rules so it is NEVER blank or hidden
     const instantData = generateInstantTranslation(trimmed, safeContext, pageNumber, activeMode);
-    
-    // Reverse logic if translationDirection is ar-to-fr (placeholder for now as core logic is fr->ar)
-    if (translationDirection === 'ar-to-fr') {
-        // ... (we'll need a way to support this in generateInstantTranslation if needed, but for now focus on the UI)
-    }
 
     updateTranslationCleanly(instantData);
-    setLatestPageTranslation(currentBook, pageNumber, instantData);
+    if (isFullPage) {
+      setLatestPageTranslation(currentBook, pageNumber, instantData);
+    }
     setCurrentView('reader');
     setIsTranslating(true);
     setTranslationError(null);
 
-    // 3. Fetch enhanced server-side insights asynchronously with strictly bounded 500-character snippet limit
+    // 3. Fetch enhanced server-side insights asynchronously with strictly bounded interval
     try {
-      const data = await translationService.translate(trimmed, undefined);
+      const data = await translationService.translate({
+        text: trimmed,
+        context: safeContext,
+        pageNumber,
+        bookId: currentBook,
+        translationMode: activeMode,
+        selectionType: words.length <= 1 ? 'WORD' : (words.length <= 40 ? 'SENTENCE' : 'PARAGRAPH'),
+      });
       
       if (data && data.arabicTranslation) {
-        const dataWords = data.arabicTranslation.trim().split(/\s+/).filter(Boolean).length;
-        const instantWords = instantData.arabicTranslation.trim().split(/\s+/).filter(Boolean).length;
-        if (words.length > 50 && dataWords < instantWords * 0.5) {
-          console.warn('[Translation] Server response was shorter than local full translation, preserving complete translation.');
-        } else if (words.length <= 35 && dataWords > words.length * 4 && instantWords <= words.length * 2.5) {
-          console.warn('[Translation] Preserving strictly bounded short paragraph translation without spillover.');
+        const bareme = validateTranslationBareme(trimmed, data.arabicTranslation);
+        if (bareme.isOverExpanded && !instantData.selfVerification?.autoCorrected) {
+          console.warn('[Translation Barème] Server response over-expanded beyond target interval, preserving strictly bounded local translation.');
+          setCachedTranslation(currentBook, pageNumber, trimmed, instantData, activeMode, false);
         } else {
           updateTranslationCleanly(data);
           setCachedTranslation(currentBook, pageNumber, trimmed, data, activeMode, false);
-          setLatestPageTranslation(currentBook, pageNumber, data);
+          if (isFullPage) {
+            setLatestPageTranslation(currentBook, pageNumber, data);
+          }
         }
       }
     } catch (err: any) {

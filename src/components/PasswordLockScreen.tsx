@@ -13,8 +13,8 @@ export const PasswordLockScreen: React.FC<PasswordLockScreenProps> = ({ onUnlock
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanInput = password.trim().toLowerCase();
-    // Required password by user request: "sir thawa"
-    if (cleanInput === 'sir thawa' || cleanInput === 'sirthawa') {
+    // Required password by user request: "9ta3 lah yjib lina hmar nrkbo 3lih"
+    if (cleanInput === '9ta3 lah yjib lina hmar nrkbo 3lih' || cleanInput === '9ta3lahyjiblinahmarnrkbo3lih' || cleanInput.includes('9ta3 lah yjib lina hmar')) {
       onUnlock();
     } else {
       setError(true);
@@ -67,7 +67,7 @@ export const PasswordLockScreen: React.FC<PasswordLockScreenProps> = ({ onUnlock
 
           {error && (
             <p className="text-xs text-rose-600 dark:text-rose-400 font-arabic text-center font-bold animate-shake">
-              ❌ كلمة المرور غير صحيحة! (تلميح: sir thawa)
+              ❌ كلمة المرور غير صحيحة! (تلميح: 9ta3 lah yjib lina hmar nrkbo 3lih)
             </p>
           )}
 

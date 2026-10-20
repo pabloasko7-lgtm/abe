@@ -3,12 +3,20 @@
 html {
   scroll-behavior: smooth;
   scroll-padding-top: 2rem;
+  -webkit-font-smoothing: antialiased;
 }
 
 body {
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
+  will-change: transform;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  perspective: 1000px;
+  -webkit-perspective: 1000px;
   backdrop-filter: blur(var(--scroll-blur, 0px));
   -webkit-backdrop-filter: blur(var(--scroll-blur, 0px));
-  transition: backdrop-filter 0.05s ease-out;
+  transition: backdrop-filter 0.02s linear;
 }
 
 /* Premium custom scrollbar */

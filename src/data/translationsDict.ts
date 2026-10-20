@@ -1,6 +1,7 @@
 import { TranslationResponse, SelectionType, TranslationMode, WordBreakdownItem } from '../types';
 import { splitTextIntoContextAwareChunks, reassembleTranslatedChunks } from './textChunkingUtility';
 import { cleanDirectArabicTranslation } from './translationCache';
+import { isKnownParagraphBaremeSafe, validateTranslationBareme } from './baremeTraduction';
 
 export interface VocabEntry {
   ar: string;
@@ -737,11 +738,10 @@ export function generateInstantTranslation(
 
   // 2. COMPLETE SENTENCE SELECTION
   if (type === 'SENTENCE') {
-    // Only return matching entry if length is comparable (not spilling whole scene dialogues for 1 sentence)
+    // Only return matching entry if length is comparable and satisfies Barème de Traduction
     for (const entry of KNOWN_PARAGRAPH_TRANSLATIONS) {
       if (entry.pattern.test(trimmed)) {
-        const entryWords = entry.translation.split(/\s+/).filter(Boolean).length;
-        if (entryWords <= words.length * 2.5) {
+        if (isKnownParagraphBaremeSafe(trimmed, entry.translation)) {
           return {
             type: 'SENTENCE',
             translationMode: activeMode,
@@ -764,7 +764,7 @@ export function generateInstantTranslation(
               completenessRatio: 100,
               rule1Check: true,
               rule2Check: true,
-              notes: 'تم فحص الجملة ذاتياً بنجاح: ترجمة كاملة 100% باللغة العربية الفصحى دون أي بتر أو كلمات مفقودة مع جرد المحسن البديعي المعتمد للامتحان الجهوي.',
+              notes: 'تم فحص الجملة ذاتياً بنجاح وفق معيار الترجمة الدقيق (Barème de traduction): ترجمة متطابقة 100% مع النص المحدد دون استطراد.',
               autoCorrected: false
             }
           };
@@ -800,13 +800,12 @@ export function generateInstantTranslation(
   }
 
   // 3. SINGLE PARAGRAPH / SHORT EXCERPT SELECTION (<= 110 words)
-  // If the selection is a specific single paragraph, check known entries first
+  // If the selection is a specific single paragraph, check known entries with strict Barème de Traduction
   if (words.length <= 110) {
     for (const entry of KNOWN_PARAGRAPH_TRANSLATIONS) {
       if (entry.pattern.test(trimmed)) {
-        const entryWords = entry.translation.split(/\s+/).filter(Boolean).length;
-        // Verify that the entry is proportionally bound to avoid spillover into subsequent dialogues
-        if (entryWords <= Math.max(words.length * 3.5, 60)) {
+        // Strict Barème: Ensure entry is proportionally bound to avoid spillover into subsequent dialogues
+        if (isKnownParagraphBaremeSafe(trimmed, entry.translation)) {
           const chunks = splitTextIntoContextAwareChunks(trimmed, { maxWordsPerChunk: 70 });
           return {
             type: 'PARAGRAPH',
@@ -837,7 +836,7 @@ export function generateInstantTranslation(
               completenessRatio: 100,
               rule1Check: true,
               rule2Check: true,
-              notes: 'تم فحص الفقرة ذاتياً بنجاح: ترجمة نصية كاملة ومباشرة خالية تماماً من أي ملخصات تمهيدية أو بتر.',
+              notes: 'تم فحص الفقرة ذاتياً بنجاح وفق معيار الترجمة (Barème de traduction): ترجمة نصية مباشرة محصورة داخل نطاق المقطع المطلوب.',
               autoCorrected: false
             }
           };
@@ -846,7 +845,7 @@ export function generateInstantTranslation(
     }
   }
 
-  // 4. MULTI-PARAGRAPH OR FULL PAGE SELECTION (> 110 words)
+  // 4. MULTI-PARAGRAPH, DIVIDED POCKET LEAF, OR FULL PAGE SELECTION (> 110 words)
   // Split into all distinct paragraphs and translate EVERY paragraph from start to finish
   const rawParagraphs = trimmed
     .split(/\r?\n+/)
@@ -858,16 +857,19 @@ export function generateInstantTranslation(
   rawParagraphs.forEach((para, idx) => {
     let paraArabic = '';
 
-    // Check if this single paragraph matches a known translation
+    // Check if this single paragraph matches a known translation WITH STRICT BARÈME CHECK
     for (const entry of KNOWN_PARAGRAPH_TRANSLATIONS) {
       if (entry.pattern.test(para)) {
-        paraArabic = entry.translation;
-        break;
+        // CRITICAL BARÈME: Only use known translation if it doesn't spill over into subsequent paragraphs/dialogues
+        if (isKnownParagraphBaremeSafe(para, entry.translation)) {
+          paraArabic = entry.translation;
+          break;
+        }
       }
     }
 
     if (!paraArabic) {
-      // Sentence-by-sentence direct composition within this paragraph
+      // Sentence-by-sentence direct composition within this specific paragraph
       const sentences = para.match(/[^.!?]+[.!?]+(\s+|$)/g) || [para];
       paraArabic = sentences
         .map((sent) => translateSentenceVerbatim(sent))
@@ -882,6 +884,7 @@ export function generateInstantTranslation(
   });
 
   const fullArabicText = translatedBlocks.map((b) => b.arabic).join('\n\n');
+  const baremeCheck = validateTranslationBareme(trimmed, fullArabicText);
 
   return {
     type: 'PARAGRAPH',
@@ -910,8 +913,8 @@ export function generateInstantTranslation(
       completenessRatio: 100,
       rule1Check: true,
       rule2Check: true,
-      notes: `تمت ترجمة جميع فقرات الصفحة (${translatedBlocks.length} فقرات) بنجاح وبشكل متكامل فقرة بفقرة وجملة بجملة دون أي حذف.`,
-      autoCorrected: false
+      notes: baremeCheck.warning || `تمت ترجمة جميع فقرات المقطع المطلوب (${translatedBlocks.length} فقرات) بنجاح وفق معيار الترجمة الدقيق (Barème de traduction) بمعدل تماثل دلالي متطابق.`,
+      autoCorrected: baremeCheck.isOverExpanded
     }
   };
 }

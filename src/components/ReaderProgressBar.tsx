@@ -78,8 +78,8 @@ export const ReaderProgressBar: React.FC<ReaderProgressBarProps> = ({
   const chapterTotalPages = Math.max(1, currentChapter.endPage - currentChapter.startPage + 1);
   const chapterProgressPercent = Math.min(100, Math.round((chapterCurrentPageOffset / chapterTotalPages) * 100));
 
-  // Reading time estimate (~2 minutes per page for deep study with vocabulary)
-  const estimatedRemainingMinutes = Math.ceil(remainingPages * 2);
+  // Reading time estimate based on dynamic average reading speed
+  const estimatedRemainingMinutes = Math.ceil(remainingPages * (sessionStats?.averageMinutesPerPage || 1.8));
 
   // Book-specific color schemes
   const barGradient = isAntigone
@@ -183,7 +183,27 @@ export const ReaderProgressBar: React.FC<ReaderProgressBarProps> = ({
           </div>
 
           {/* Right: Completion Percentage Badge & Page Details */}
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0 mr-auto sm:mr-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0 mr-auto sm:mr-0 flex-wrap sm:flex-nowrap">
+            {/* Subtle Reading Session Timer & Chapter Remaining Time Badge */}
+            <div 
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 dark:bg-amber-400/10 border border-amber-500/25 dark:border-amber-400/20 text-stone-700 dark:text-stone-300 text-xs font-arabic select-none shadow-2xs hover:border-amber-500/40 transition-colors"
+              title={`جلسة القراءة الحالية: ${sessionStats.formattedSessionTime} | متبقي للفصل (${sessionStats.remainingPagesInChapter} صفحات): ${sessionStats.formattedChapterRemaining} | معدل السرعة: ${sessionStats.averageMinutesPerPage} دقيقة/صفحة (${sessionStats.isSpeedEstimated ? 'تقدير أساسي' : `محسوب من قراءتك لـ ${sessionStats.pagesCounted} صفحات`})`}
+            >
+              <Timer className={`w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 ${sessionStats.isTimerRunning ? 'animate-pulse' : 'opacity-70'}`} />
+              <div className="flex items-center gap-1 font-mono text-[11px]">
+                <span className="text-stone-500 dark:text-stone-400 hidden xs:inline font-arabic text-[10px]">الجلسة:</span>
+                <span className="font-bold text-stone-900 dark:text-stone-100">{sessionStats.formattedSessionTime}</span>
+              </div>
+              <span className="text-stone-300 dark:text-stone-600">·</span>
+              <div className="flex items-center gap-1 text-[11px]">
+                <span className="text-stone-500 dark:text-stone-400 hidden sm:inline font-arabic text-[10px]">متبقي للفصل:</span>
+                <span className="font-bold font-mono text-amber-700 dark:text-amber-300">{sessionStats.formattedChapterRemaining}</span>
+              </div>
+              <span className="text-[10px] text-stone-400 dark:text-stone-500 font-mono hidden lg:inline">
+                ({sessionStats.averageMinutesPerPage} د/ص)
+              </span>
+            </div>
+
             {/* Last read page & Remaining count */}
             <div className="text-left font-sans text-xs hidden md:flex items-center gap-2">
               <span className="text-stone-600 dark:text-stone-400">

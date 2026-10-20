@@ -1388,16 +1388,38 @@ export const ReaderView: React.FC<ReaderViewProps> = ({
             )}
           </button>
 
-          {/* 1-Click Fast AI Page Translation Button */}
-          <button
-            id={`translate-page-btn-${currentPageData.pageNumber}`}
-            onClick={() => triggerTranslation(currentPageData.text)}
-            className="px-3 py-1 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:scale-98 text-white font-arabic font-bold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer ring-2 ring-emerald-500/30"
-            title="ترجمة الصفحة الحالية كاملة بالذكاء الاصطناعي بدقة متناهية"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-200 animate-pulse" />
-            <span>ترجمة الصفحة بـ AI</span>
-          </button>
+          {/* 1-Click Fast AI Translation: Divided Sub-page Leaf OR Full Page */}
+          {readingMode === 'chunks' && pageChunks.length > 1 ? (
+            <div className="flex items-center gap-1">
+              <button
+                id={`translate-leaf-btn-${currentPageData.pageNumber}-${validSubPageIndex}`}
+                onClick={() => triggerTranslation(currentChunk.paragraphs.join('\n\n'))}
+                className="px-3 py-1 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:scale-98 text-white font-arabic font-bold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer ring-2 ring-emerald-500/30"
+                title={`ترجمة الورقة المقسمة الحالية (${validSubPageIndex + 1} من ${pageChunks.length}) بالذكاء الاصطناعي مع احترام معيار نطاق المقطع فقط`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-200 animate-pulse" />
+                <span>ترجمة الورقة المقسمة ({validSubPageIndex + 1}/{pageChunks.length})</span>
+              </button>
+              <button
+                id={`translate-fullpage-btn-${currentPageData.pageNumber}`}
+                onClick={() => triggerTranslation(currentPageData.text)}
+                className="px-2 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-100 hover:text-white font-arabic font-bold text-[11px] transition-all cursor-pointer"
+                title="ترجمة كامل الصفحة (كل الأوراق المقسمة معاً)"
+              >
+                <span>كامل الصفحة</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              id={`translate-page-btn-${currentPageData.pageNumber}`}
+              onClick={() => triggerTranslation(currentPageData.text)}
+              className="px-3 py-1 rounded-lg bg-emerald-800 hover:bg-emerald-700 active:scale-98 text-white font-arabic font-bold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer ring-2 ring-emerald-500/30"
+              title="ترجمة الصفحة الحالية كاملة بالذكاء الاصطناعي بدقة متناهية"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-200 animate-pulse" />
+              <span>ترجمة الصفحة بـ AI</span>
+            </button>
+          )}
 
           {/* Bookmark / Star Page Button */}
           <button
