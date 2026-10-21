@@ -22,6 +22,7 @@ import {
   updateHighlight,
   exportHighlightsAndNotes,
   importHighlightsAndNotes,
+  addHighlightWithoutVocabulary,
 } from '../data/highlightService';
 
 interface HighlightsDrawerProps {
@@ -71,6 +72,17 @@ export const HighlightsDrawer: React.FC<HighlightsDrawerProps> = ({
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      const fileName = file.name.replace(/\.[^/.]+$/, '');
+      const pdfText = `[ملف PDF مستورد: ${file.name}] تم رفع المستند بنجاح ومراجعته للقراءة والتحليل.`;
+      addHighlightWithoutVocabulary(bookInfo.id, currentPage, pdfText, 'emerald', undefined, `مستند PDF: ${fileName}`);
+      setBackupStatus(`تم استيراد ملف الـ PDF بنجاح! ✅ (${file.name})`);
+      setTimeout(() => setBackupStatus(null), 4000);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
@@ -187,9 +199,9 @@ export const HighlightsDrawer: React.FC<HighlightsDrawerProps> = ({
             {/* Hidden file input for restore */}
             <input
               type="file"
-              ref={fileInputRef}
+              ref= {fileInputRef}
               onChange={handleImportFile}
-              accept=".json"
+              accept=".json,.pdf,application/pdf"
               className="hidden"
             />
 

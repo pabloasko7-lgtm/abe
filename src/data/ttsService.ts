@@ -326,7 +326,11 @@ export function resolveBestVoice(lang: 'fr' | 'ar', settings?: TTSSettings): Spe
     })[0];
   }
 
-  // If no matching voice found, return null so browser speech synthesis uses default voice for utterance.lang
+  // Ultimate fallback: if no matching language voice found, return any available system voice so audio is never silent
+  if (allVoices.length > 0) {
+    return allVoices[0];
+  }
+
   return null;
 }
 

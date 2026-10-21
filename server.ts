@@ -610,6 +610,8 @@ function parseJsonResponse(raw: string): any {
   }
 }
 
+let apiQuotaExceededUntil = 0;
+
 // Helper for resilient Gemini API calls across models during high-demand spikes
 async function generateContentWithFallback(
   ai: GoogleGenAI,
@@ -620,7 +622,10 @@ async function generateContentWithFallback(
     temperature?: number;
   }
 ): Promise<string> {
-  // Rotate smoothly across fast, high-quality models with gemini-flash-lite-latest first for lightning speed & high quota
+  if (Date.now() < apiQuotaExceededUntil) {
+    throw new Error("Quota temporarily exhausted (circuit breaker active)");
+  }
+
   const candidateModels = [
     "gemini-flash-lite-latest",
     "gemini-3.1-flash-lite",
@@ -630,44 +635,32 @@ async function generateContentWithFallback(
   ];
   let lastError: any = null;
 
-  for (let pass = 0; pass < 2; pass++) {
-    for (const model of candidateModels) {
-      try {
-        const response = await withTimeout(
-          ai.models.generateContent({
-            model,
-            contents: config.contents,
-            config: {
-              systemInstruction: config.systemInstruction,
-              responseMimeType: config.responseMimeType,
-              temperature: config.temperature,
-            },
-          }),
-          10000,
-          model
-        );
+  for (const model of candidateModels) {
+    try {
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model,
+          contents: config.contents,
+          config: {
+            systemInstruction: config.systemInstruction,
+            responseMimeType: config.responseMimeType,
+            temperature: config.temperature,
+          },
+        }),
+        8000,
+        model
+      );
 
-        if (response.text) {
-          return response.text.trim();
-        }
-      } catch (err: any) {
-        lastError = err;
-        const errorMsg = err?.message || String(err);
-        const isTransient =
-          errorMsg.includes("503") ||
-          err?.status === 503 ||
-          errorMsg.includes("high demand") ||
-          errorMsg.includes("UNAVAILABLE") ||
-          errorMsg.includes("Timeout") ||
-          err?.status === 429 ||
-          errorMsg.includes("RESOURCE_EXHAUSTED");
-
-        console.log(`[Model Rotation] Pass ${pass + 1}: ${model} unavailable (transient: ${isTransient}), trying next.`);
+      if (response.text) {
+        return response.text.trim();
       }
-    }
-    // Brief delay before second pass if all candidate models experienced temporary load
-    if (pass === 0) {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+    } catch (err: any) {
+      lastError = err;
+      const errorMsg = err?.message || String(err);
+      if (errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota")) {
+        apiQuotaExceededUntil = Date.now() + 60 * 60 * 1000; // bypass API for 1 hour when quota exhausted
+        throw err;
+      }
     }
   }
 
@@ -1157,7 +1150,9 @@ Note: Return ONLY valid JSON. Do not duplicate the Arabic text.`;
         temperature: 0.1,
       });
     } catch (_geminiError: any) {
-      console.log("[Translation Fallback] Serving fallback because Gemini failed:", _geminiError?.message || _geminiError);
+      if (!String(_geminiError?.message || "").includes("Quota")) {
+        console.log("[Translation Fallback] Serving local translation:", _geminiError?.message || _geminiError);
+      }
       const localResult = generateLocalTranslation(trimmedText, context, pageNumber, detectedType, currentBookTitle, activeTranslationMode);
       return res.json({
         ...localResult,

@@ -158,6 +158,45 @@ export function addHighlight(
   return newHighlight;
 }
 
+export function addHighlightWithoutVocabulary(
+  bookId: BookId,
+  pageNumber: number,
+  text: string,
+  colorId: string = 'yellow',
+  customColorHex?: string,
+  note?: string
+): TextHighlight {
+  const cleanText = text.trim();
+  const all = getAllHighlights(bookId);
+
+  const existingIndex = all.findIndex(
+    (h) => h.pageNumber === pageNumber && h.text.trim() === cleanText
+  );
+
+  const newHighlight: TextHighlight = {
+    id: existingIndex >= 0 ? all[existingIndex].id : `hl-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    bookId,
+    pageNumber,
+    text: cleanText,
+    colorId,
+    customColorHex,
+    createdAt: Date.now(),
+    note: note || (existingIndex >= 0 ? all[existingIndex].note : undefined),
+  };
+
+  let updatedList: TextHighlight[];
+  if (existingIndex >= 0) {
+    updatedList = [...all];
+    updatedList[existingIndex] = newHighlight;
+  } else {
+    updatedList = [newHighlight, ...all];
+  }
+
+  saveHighlights(bookId, updatedList);
+  return newHighlight;
+}
+
+
 export function updateHighlight(
   bookId: BookId,
   id: string,

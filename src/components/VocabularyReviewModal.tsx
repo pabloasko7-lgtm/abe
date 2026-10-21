@@ -40,7 +40,8 @@ import {
   Coffee,
   Trophy,
   XCircle,
-  RotateCcw
+  RotateCcw,
+  Download
 } from 'lucide-react';
 import {
   BookId,
@@ -63,6 +64,7 @@ import {
   translateFlashcardWithAI,
   syncAllHighlightsToVocabulary
 } from '../data/vocabularyService';
+import { VocabularyExportModal } from './VocabularyExportModal';
 
 interface VocabularyReviewModalProps {
   isOpen: boolean;
@@ -112,6 +114,7 @@ export const VocabularyReviewModal: React.FC<VocabularyReviewModalProps> = ({
   const [inspectedCard, setInspectedCard] = useState<FlashcardWord | null>(null);
   const [showOnlyHighlights, setShowOnlyHighlights] = useState<boolean>(false);
   const [translatingCardId, setTranslatingCardId] = useState<string | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
 
   // Sync highlights into flashcards whenever modal opens
   useEffect(() => {
@@ -2138,13 +2141,27 @@ export const VocabularyReviewModal: React.FC<VocabularyReviewModalProps> = ({
                     <FileText className="w-3.5 h-3.5" />
                     <span>تصدير PDF / طباعة المفردات 🖨️</span>
                   </button>
-                  <span className="text-[11px] text-amber-900/80 dark:text-amber-400/80 hidden sm:inline">
-                    💡 انقر على أي كلمة لعرض الشرح
-                  </span>
+                  <button
+                    onClick={() => setShowExportModal(true)}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-700 hover:bg-indigo-600 text-white font-bold font-arabic text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                    title="تصدير متقدم (Excel, Anki)"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>تصدير متقدم...</span>
+                  </button>
                 </div>
               </div>
+            </div>
 
-              {filteredCards.length === 0 ? (
+              <VocabularyExportModal
+                isOpen={showExportModal}
+                onClose={() => setShowExportModal(false)}
+                filteredCards={filteredCards}
+                allCards={cards}
+                activeBookId={activeBookId}
+              />
+
+            {filteredCards.length === 0 ? (
                 <div className="text-center py-12 bg-white dark:bg-stone-850 rounded-2xl p-6 space-y-3 border border-stone-200 dark:border-stone-700">
                   <p className="font-bold text-stone-700 dark:text-stone-300 font-arabic">
                     لا توجد مفردات أو تظليلات مطابقة للفلتر المحدد.
