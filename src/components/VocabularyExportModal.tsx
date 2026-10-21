@@ -14,9 +14,6 @@ import {
 } from '../data/vocabularyExportService';
 import { getBookInfo } from '../data/bookService';
 import { addCustomCard } from '../data/vocabularyService';
-import * as pdfjsLib from 'pdfjs-dist';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface VocabularyExportModalProps {
   isOpen: boolean;
@@ -48,37 +45,24 @@ export const VocabularyExportModal: React.FC<VocabularyExportModalProps> = ({
 
   const handleImportPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || file.type !== 'application/pdf') return;
+    if (!file || !file.type.includes('pdf')) return;
 
     const reader = new FileReader();
     reader.onload = async (event) => {
-      const typedarray = new Uint8Array(event.target?.result as ArrayBuffer);
-      const pdf = await pdfjsLib.getDocument({ data: typedarray }).promise;
-      let fullText = '';
-      
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        fullText += textContent.items.map((item: any) => item.str).join(' ');
-      }
-
-      // Parsing logic: Assumes format "word - meaning" per line or block
-      // Adjusting regex to capture "word - meaning" even with spaces
-      const lines = fullText.split('\n');
+      const text = event.target?.result as string;
+      // Parsing logic: Assumes format "word - meaning" per line
+      const lines = text.split('\n');
       let addedCount = 0;
       for (const line of lines) {
         if (line.includes('-')) {
           const [word, meaning] = line.split('-').map(s => s.trim());
           if (word && meaning) {
-            addCustomCard({
-              bookId: activeBookId,
+            addCustomCard(activeBookId, {
               frenchWord: word,
               arabicMeaning: meaning,
               contextualMeaning: 'مستورد من ملف PDF',
               partOfSpeech: 'غير محدد',
-              pageNumber: 1,
-              synonyms: [],
-              masteryLevel: 'new'
+              pageNumber: 1
             });
             addedCount++;
           }
@@ -86,7 +70,7 @@ export const VocabularyExportModal: React.FC<VocabularyExportModalProps> = ({
       }
       showNotification(`تم استيراد ${addedCount} مفردة من ملف الـ PDF بنجاح!`);
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsText(file);
     if (e.target) e.target.value = '';
   };
 
